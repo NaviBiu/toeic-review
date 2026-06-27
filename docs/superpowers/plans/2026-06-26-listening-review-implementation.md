@@ -3063,6 +3063,25 @@ describe('POST /api/review/:id/answer', () => {
     expect(body.correctStreak).toBe(0);
     expect(body.wrongCount).toBe(1);
   });
+
+  it('returns 400 for a non-numeric id instead of crashing', async () => {
+    const req = new NextRequest(new Request('http://localhost/api/review/abc/answer', {
+      method: 'POST',
+      body: JSON.stringify({ correct: true }),
+    }));
+    const res = await answerRoute(req, { params: Promise.resolve({ id: 'abc' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a malformed JSON body instead of crashing', async () => {
+    const kp = await seed();
+    const req = new NextRequest(new Request(`http://localhost/api/review/${kp.id}/answer`, {
+      method: 'POST',
+      body: 'not json',
+    }));
+    const res = await answerRoute(req, { params: Promise.resolve({ id: String(kp.id) }) });
+    expect(res.status).toBe(400);
+  });
 });
 ```
 
@@ -3099,7 +3118,7 @@ export async function GET(req: NextRequest) {
 
 - [ ] **Step 4: Implement the answer route**
 
-Create `src/app/api/review/[id]/answer/route.ts`:
+Create `src/app/api/review/[id]/answer/route.ts`. Guards against two real failure modes the literal happy-path code would otherwise crash on with an opaque 500: a non-numeric `id` (`Number(id)` → `NaN`, which would reach `applyReviewResult` and blow up on a row that can never be found) and a malformed JSON body (`req.json()` throwing synchronously):
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -3109,12 +3128,25 @@ import { todayInShanghai } from '@/lib/dateUtils';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { correct } = await req.json();
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId)) {
+    return NextResponse.json({ error: '无效的知识点 id' }, { status: 400 });
+  }
+
+  let correct: unknown;
+  try {
+    ({ correct } = await req.json());
+  } catch {
+    return NextResponse.json({ error: '请求格式不正确' }, { status: 400 });
+  }
+
   const client = createClient();
   await client.connect();
   try {
-    const updated = await applyReviewResult(client, Number(id), !!correct, todayInShanghai());
+    const updated = await applyReviewResult(client, numericId, !!correct, todayInShanghai());
     return NextResponse.json(updated);
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 404 });
   } finally {
     await client.end();
   }
@@ -3124,7 +3156,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 - [ ] **Step 5: Run it to verify it passes**
 
 Run: `npx vitest run tests/integration/reviewApi.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (5 tests)
 
 - [ ] **Step 6: Commit**
 

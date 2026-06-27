@@ -55,4 +55,23 @@ describe('POST /api/review/:id/answer', () => {
     expect(body.correctStreak).toBe(0);
     expect(body.wrongCount).toBe(1);
   });
+
+  it('returns 400 for a non-numeric id instead of crashing', async () => {
+    const req = new NextRequest(new Request('http://localhost/api/review/abc/answer', {
+      method: 'POST',
+      body: JSON.stringify({ correct: true }),
+    }));
+    const res = await answerRoute(req, { params: Promise.resolve({ id: 'abc' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a malformed JSON body instead of crashing', async () => {
+    const kp = await seed();
+    const req = new NextRequest(new Request(`http://localhost/api/review/${kp.id}/answer`, {
+      method: 'POST',
+      body: 'not json',
+    }));
+    const res = await answerRoute(req, { params: Promise.resolve({ id: String(kp.id) }) });
+    expect(res.status).toBe(400);
+  });
 });
