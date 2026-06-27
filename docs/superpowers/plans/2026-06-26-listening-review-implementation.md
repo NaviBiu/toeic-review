@@ -28,6 +28,7 @@ Spec reference: `docs/superpowers/specs/2026-06-26-listening-review-design.md` (
 - `@vercel/postgres` prints a deprecation warning on install ("choose an alternate storage solution... migrated to Neon as a native Vercel integration") — this is expected and not a bug to fix. It was verified working end-to-end in Task 1 against the actual Neon-backed database this project provisioned through Vercel's Storage tab; keep using `sql`/`createClient` from `@vercel/postgres` exactly as every task already specifies. Do not switch to `@neondatabase/serverless` or any other client.
 - This sandboxed dev environment proxies outbound HTTP through `HTTP_PROXY`/`HTTPS_PROXY=http://127.0.0.1:18081`, but Node 24's native `fetch`/undici (used by `@anthropic-ai/sdk` and Next.js route handlers) does not honor those vars unless `NODE_USE_ENV_PROXY=1` is also set — without it, any real call to `api.anthropic.com` silently bypasses the proxy and gets blocked at the sandbox boundary with a `403`/`401`-shaped error that looks like an Anthropic auth failure but isn't one (confirmed in Task 10: curl succeeded with the same key while the SDK failed, because curl always honors proxy env vars and Node's fetch didn't). This is already fixed at the shell level for this machine (`node`/`npm`/`npx` wrapper scripts under `~/.local/bin` export `NODE_USE_ENV_PROXY=1` before exec'ing the real binary) — no task needs to set this itself. If a future manual test against the real Anthropic API ever gets an inexplicable 401/403 that contradicts a direct curl test with the same key, this is the first thing to check, not the API key or billing.
 - `pdf-parse@2.x` (the version actually installed) is a breaking rewrite of `pdf-parse@1.x`'s API — no default-export function, instead a named `PDFParse` class with `getText()`/`destroy()` (Task 10 already corrected this; see Task 10's `fileExtract.ts` code).
+- `vitest.config.ts` sets `fileParallelism: false` (Task 2, hardened in Task 11) because running integration test files in parallel opens too many concurrent connections against the live Neon database's free-tier connection limit, causing intermittent connection-contention timeouts unrelated to any actual code defect. Always run the suite as plain `npx vitest run` (no parallelism flags needed, it's already serialized by config) — if a "full suite" verification step ever shows a flaky timeout despite this, re-run once before assuming a real regression, but do not "fix" it by reverting `fileParallelism` to its default.
 - The Vercel project (`navibius-projects/toeic-review`) currently deploys from the `worktree-toeic-review-impl` git branch, not `main`/`master` — Preview deployments build from this branch automatically on push. This is intentional during implementation; Task 18 / the eventual merge to the main branch is what's expected to produce the real Production deployment.
 
 ---
@@ -389,7 +390,7 @@ export async function withTestClient(fn: (client: VercelClient) => Promise<void>
 }
 ```
 
-Create `vitest.config.ts`. The `resolve.alias` here must mirror `tsconfig.json`'s `@/* -> ./src/*` mapping — every API route file created from Task 8 onward imports via `@/lib/...`, and integration tests import those route files directly, so without this alias every such test fails to resolve its imports:
+Create `vitest.config.ts`. The `resolve.alias` here must mirror `tsconfig.json`'s `@/* -> ./src/*` mapping — every API route file created from Task 8 onward imports via `@/lib/...`, and integration tests import those route files directly, so without this alias every such test fails to resolve its imports. `fileParallelism: false` is also load-bearing, not a performance tweak: each integration test file opens its own connection against the live Neon database, and Vitest's default parallel-file execution can exceed Neon's free-tier concurrent-connection limit, producing intermittent connection-contention timeouts that look like flaky tests but aren't (found in Task 11 — `npx vitest run` without this setting showed sporadic failures that vanished under `--no-file-parallelism`; setting it as the project default makes `npm test` reliably green for anyone, including the end user, without needing to know to pass that flag):
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -405,6 +406,7 @@ export default defineConfig({
     environment: 'node',
     setupFiles: [],
     testTimeout: 15000,
+    fileParallelism: false,
   },
 });
 ```
