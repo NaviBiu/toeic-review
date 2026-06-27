@@ -32,8 +32,11 @@ export default function ReviewPage() {
   }
 
   function revoke() {
-    setGuess(null);
-    setPhase('guessing');
+    // Flip to the other choice without re-hiding the answer or returning to the
+    // guessing phase -- per spec, 撤回 lets the user correct a mis-click while
+    // still seeing meaning/example/notes, then commit via 下一个. It is not a
+    // "start over blind" action.
+    setGuess((g) => (g === 'remember' ? 'forgot' : 'remember'));
   }
 
   async function next() {
@@ -101,8 +104,9 @@ export default function ReviewPage() {
                 <p className="text-gray-700">{current.meaning}</p>
                 <p className="text-gray-500 text-sm mt-1">{current.example}</p>
                 {current.notes && <p className="text-gray-400 text-sm mt-1">{current.notes}</p>}
-                <div className="flex gap-3 mt-4">
-                  <button onClick={revoke} className="text-sm text-gray-500 underline">撤回</button>
+                <div className="flex gap-3 mt-4 items-center">
+                  <span className="text-sm text-gray-500">你的判断:{guess === 'remember' ? '记得' : '不记得'}</span>
+                  <button onClick={revoke} className="text-sm text-gray-500 underline">撤回(改选)</button>
                   <button onClick={next} className="bg-blue-600 text-white rounded px-4 py-2">下一个</button>
                 </div>
               </>
