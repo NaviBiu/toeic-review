@@ -1,6 +1,8 @@
 import { config } from 'dotenv';
 config({ path: '.env.local' });
 import { createClient, type VercelClient } from '@vercel/postgres';
+import '../../src/lib/db'; // registers the DATE type-parser fix (see src/lib/db.ts) before any test query runs,
+// independent of whether the test file under execution happens to import a module that pulls it in transitively.
 
 export async function withTestClient(fn: (client: VercelClient) => Promise<void>) {
   const client = createClient();
