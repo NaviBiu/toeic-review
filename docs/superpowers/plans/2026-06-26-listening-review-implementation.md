@@ -4,7 +4,7 @@
 
 **Goal:** Build and deploy a private web app where the user imports daily TOEIC listening error notes (PDF/Word), reviews them on a spaced-repetition schedule from any device, logs mock-exam scores, and can delete items or export all data.
 
-**Architecture:** Next.js (App Router, TypeScript) single project, deployed on Vercel, backed by Vercel Postgres. All business logic that doesn't need I/O (date math, term normalization, scenario validation, the SRS algorithm, the import dedup decision) lives in pure, unit-tested functions under `src/lib/`. Data access goes through thin per-table modules. API routes wire pure logic + data access together. A Next.js middleware enforces a single shared-password cookie on every route.
+**Architecture:** Next.js (App Router, TypeScript) single project, deployed on Vercel, backed by Vercel Postgres. All business logic that doesn't need I/O (date math, term normalization, scenario validation, the SRS algorithm, the import dedup decision) lives in pure, unit-tested functions under `src/lib/`. Data access goes through thin per-table modules. API routes wire pure logic + data access together. A Next.js proxy (this project is on Next.js 16, where `middleware.ts` is deprecated in favor of `proxy.ts`) enforces a single shared-password cookie on every route.
 
 **Tech Stack:** Next.js 14 (App Router) + TypeScript, Tailwind CSS, `@vercel/postgres`, `@anthropic-ai/sdk` (Claude), `pdf-parse` + `mammoth` for document text extraction, Vitest for tests, GitHub + Vercel for hosting.
 
@@ -21,6 +21,11 @@ Spec reference: `docs/superpowers/specs/2026-06-26-listening-review-design.md` (
 - Cookie session: 30-day expiry, plain-text password comparison (no hashing) (spec §3, §11).
 - File upload limit: 5MB, text-based PDF/Word only, no OCR (spec §5.4).
 - No feature beyond what's in the spec's "本次做的" list — anything in "明确不做" stays out (spec §2).
+- This project runs Next.js 16 (confirmed via `package.json` after scaffolding in Task 1), which has two breaking changes versus older App Router conventions that every later task must follow: (1) dynamic route handler `params` is a `Promise` — write `{ params }: { params: Promise<{ id: string }> }` and `const { id } = await params;`, never the old synchronous `{ params: { id: string } }`; (2) `middleware.ts` is renamed to `proxy.ts` with the exported function named `proxy`, not `middleware` (Task 8 creates this; later tasks just rely on it existing, no action needed). `next.config.ts` (not `.js`) is what Task 1's scaffold actually produces — keep it as `.ts`.
+- Any script or test that needs `POSTGRES_URL`/`ANTHROPIC_API_KEY`/`APP_PASSWORD` must load them with `import { config } from 'dotenv'; config({ path: '.env.local' });` — never the bare `import 'dotenv/config'`, which only loads a file literally named `.env` and silently leaves every var undefined against the `.env.local` that `vercel env pull` actually writes (confirmed by hitting this in Task 1).
+- `.env.local` in this worktree already has real values for `POSTGRES_URL`, `ANTHROPIC_API_KEY`, and `APP_PASSWORD` (set up during Task 1) — no later task needs to fetch or re-pull these. If a task's manual-verification step ever finds one missing/empty after running `vercel env pull`, that's because Vercel's "Sensitive" environment variable type returns empty on CLI pull by design; re-add the var with `vercel env add NAME preview --value=... --no-sensitive --yes` rather than assuming the credential itself is wrong.
+- `@vercel/postgres` prints a deprecation warning on install ("choose an alternate storage solution... migrated to Neon as a native Vercel integration") — this is expected and not a bug to fix. It was verified working end-to-end in Task 1 against the actual Neon-backed database this project provisioned through Vercel's Storage tab; keep using `sql`/`createClient` from `@vercel/postgres` exactly as every task already specifies. Do not switch to `@neondatabase/serverless` or any other client.
+- The Vercel project (`navibius-projects/toeic-review`) currently deploys from the `worktree-toeic-review-impl` git branch, not `main`/`master` — Preview deployments build from this branch automatically on push. This is intentional during implementation; Task 18 / the eventual merge to the main branch is what's expected to produce the real Production deployment.
 
 ---
 
@@ -33,7 +38,7 @@ toeic-review/
   scripts/
     migrate.ts
   src/
-    middleware.ts
+    proxy.ts               -- Next.js 16 renamed middleware.ts -> proxy.ts; export name is `proxy`, not `middleware`
     lib/
       dateUtils.ts          -- Asia/Shanghai "today", addDays, isFutureDate
       termNormalize.ts       -- normalizeTerm()
@@ -181,9 +186,10 @@ Expected: `.env.local` now contains `POSTGRES_URL` (and siblings), `ANTHROPIC_AP
 
 - [ ] **Step 10: Verify the DB connection**
 
-Write `scripts/check-db.ts`:
+Write `scripts/check-db.ts`. Note: plain `dotenv/config` only loads a file literally named `.env`, not `.env.local` — and `vercel env pull` always writes to `.env.local`. Point dotenv at it explicitly:
 ```typescript
-import 'dotenv/config';
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 import { sql } from '@vercel/postgres';
 
 async function main() {
@@ -287,10 +293,11 @@ CREATE TABLE mock_exam_scenario_scores (
 
 - [ ] **Step 2: Write the migration runner**
 
-Create `scripts/migrate.ts`:
+Create `scripts/migrate.ts`. As in Task 1's `check-db.ts`, point dotenv at `.env.local` explicitly — the bare `'dotenv/config'` import only loads a file named `.env`:
 
 ```typescript
-import 'dotenv/config';
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 import { createClient } from '@vercel/postgres';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -338,10 +345,11 @@ Expected: `Applied 0001_init.sql`
 
 - [ ] **Step 4: Write the test transaction helper**
 
-Create `tests/integration/setup.ts`:
+Create `tests/integration/setup.ts`. Same dotenv note as the scripts above — load `.env.local` explicitly:
 
 ```typescript
-import 'dotenv/config';
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 import { createClient, type VercelClient } from '@vercel/postgres';
 
 export async function withTestClient(fn: (client: VercelClient) => Promise<void>) {
@@ -1586,14 +1594,16 @@ git push
 
 ## Task 8: Auth — passcode gate
 
+This project is on Next.js 16, where the `middleware.ts` convention is deprecated and renamed to `proxy.ts` (function name `proxy`, not `middleware`; defaults to the Node.js runtime). Use `proxy.ts` directly — do not write a deprecated `middleware.ts`.
+
 **Files:**
 - Create: `src/lib/auth.ts`, `tests/unit/auth.test.ts`
-- Create: `src/middleware.ts`
+- Create: `src/proxy.ts`
 - Create: `src/app/api/auth/route.ts`
 - Create: `src/app/login/page.tsx`
 
 **Interfaces:**
-- Produces: `isAuthedCookie(cookieValue, expectedPassword): boolean`, a `POST /api/auth` route, and middleware that redirects unauthenticated requests to `/login`. Every other route created in later tasks is implicitly protected once this middleware exists — no later task needs to add its own auth check.
+- Produces: `isAuthedCookie(cookieValue, expectedPassword): boolean`, a `POST /api/auth` route, and a proxy that redirects unauthenticated requests to `/login`. Every other route created in later tasks is implicitly protected once this proxy exists — no later task needs to add its own auth check.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1664,15 +1674,15 @@ export async function POST(req: NextRequest) {
 }
 ```
 
-- [ ] **Step 6: Implement the middleware**
+- [ ] **Step 6: Implement the proxy**
 
-Create `src/middleware.ts`:
+Create `src/proxy.ts` (named `proxy.ts` per Next.js 16's renamed convention — a file named `middleware.ts` with a `middleware` export still works but is deprecated; write the current convention directly):
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthedCookie, AUTH_COOKIE_NAME } from '@/lib/auth';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const isPublic = req.nextUrl.pathname === '/login' || req.nextUrl.pathname === '/api/auth';
   if (isPublic) return NextResponse.next();
 
@@ -1749,7 +1759,7 @@ Expected: redirected to `/login`. Enter the wrong password → see "密码不正
 
 ```bash
 git add -A
-git commit -m "Add passcode auth: cookie check, login page, and middleware gate"
+git commit -m "Add passcode auth: cookie check, login page, and proxy gate"
 git push
 ```
 
@@ -1830,14 +1840,14 @@ describe('PATCH /api/knowledge-points/:id', () => {
       method: 'PATCH',
       body: JSON.stringify({ status: 'deleted' }),
     });
-    const delRes = await patchRoute(delReq, { params: { id: String(created.id) } });
+    const delRes = await patchRoute(delReq, { params: Promise.resolve({ id: String(created.id) }) });
     expect((await delRes.json()).status).toBe('deleted');
 
     const restoreReq = makeRequest(`http://localhost/api/knowledge-points/${created.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'active' }),
     });
-    const restoreRes = await patchRoute(restoreReq, { params: { id: String(created.id) } });
+    const restoreRes = await patchRoute(restoreReq, { params: Promise.resolve({ id: String(created.id) }) });
     const restored = await restoreRes.json();
     expect(restored.status).toBe('active');
     expect(restored.correctStreak).toBe(0);
@@ -1916,8 +1926,9 @@ import { updateKnowledgePointFields, softDeleteKnowledgePoint, restoreKnowledgeP
 import { isValidScenario } from '@/lib/scenarios';
 import { todayInShanghai } from '@/lib/dateUtils';
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: idParam } = await params;
+  const id = Number(idParam);
   const body = await req.json();
   const client = createClient();
   await client.connect();
@@ -2995,7 +3006,7 @@ describe('POST /api/review/:id/answer', () => {
       method: 'POST',
       body: JSON.stringify({ correct: true }),
     }));
-    const res = await answerRoute(req, { params: { id: String(kp.id) } });
+    const res = await answerRoute(req, { params: Promise.resolve({ id: String(kp.id) }) });
     const body = await res.json();
     expect(body.correctStreak).toBe(1);
   });
@@ -3006,7 +3017,7 @@ describe('POST /api/review/:id/answer', () => {
       method: 'POST',
       body: JSON.stringify({ correct: false }),
     }));
-    const res = await answerRoute(req, { params: { id: String(kp.id) } });
+    const res = await answerRoute(req, { params: Promise.resolve({ id: String(kp.id) }) });
     const body = await res.json();
     expect(body.correctStreak).toBe(0);
     expect(body.wrongCount).toBe(1);
@@ -3055,12 +3066,13 @@ import { createClient } from '@vercel/postgres';
 import { applyReviewResult } from '@/lib/knowledgePoints';
 import { todayInShanghai } from '@/lib/dateUtils';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const { correct } = await req.json();
   const client = createClient();
   await client.connect();
   try {
-    const updated = await applyReviewResult(client, Number(params.id), !!correct, todayInShanghai());
+    const updated = await applyReviewResult(client, Number(id), !!correct, todayInShanghai());
     return NextResponse.json(updated);
   } finally {
     await client.end();
