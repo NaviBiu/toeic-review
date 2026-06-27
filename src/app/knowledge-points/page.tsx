@@ -15,6 +15,8 @@ export default function KnowledgePointsPage() {
   const [newPart, setNewPart] = useState('1');
   const [newMeaning, setNewMeaning] = useState('');
   const [newExample, setNewExample] = useState('');
+  const [newScenarioMajor, setNewScenarioMajor] = useState<string | null>(null);
+  const [newScenarioMinor, setNewScenarioMinor] = useState<string | null>(null);
 
   async function load() {
     const params = new URLSearchParams();
@@ -40,10 +42,32 @@ export default function KnowledgePointsPage() {
     await fetch('/api/knowledge-points', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ term: newTerm, part: Number(newPart), meaning: newMeaning, example: newExample }),
+      body: JSON.stringify({
+        term: newTerm,
+        part: Number(newPart),
+        meaning: newMeaning,
+        example: newExample,
+        scenarioMajor: newScenarioMajor ?? undefined,
+        scenarioMinor: newScenarioMinor ?? undefined,
+      }),
     });
     setNewTerm(''); setNewMeaning(''); setNewExample('');
+    setNewScenarioMajor(null); setNewScenarioMinor(null);
     load();
+  }
+
+  async function handleAiAssist() {
+    const res = await fetch('/api/knowledge-points/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term: newTerm, part: Number(newPart) }),
+    });
+    if (!res.ok) return;
+    const suggestion = await res.json();
+    setNewMeaning(suggestion.meaning);
+    setNewExample(suggestion.example);
+    setNewScenarioMajor(suggestion.scenarioMajor);
+    setNewScenarioMinor(suggestion.scenarioMinor);
   }
 
   return (
@@ -53,6 +77,7 @@ export default function KnowledgePointsPage() {
       <form onSubmit={handleAdd} className="border rounded p-3 mb-4 flex flex-col gap-2 max-w-md">
         <p className="text-sm text-gray-600">手动添加一条知识点(释义/例句留空也可以保存,场景默认未分类)</p>
         <input value={newTerm} onChange={(e) => setNewTerm(e.target.value)} placeholder="词/短语" required className="border rounded px-2 py-1" />
+        <button type="button" onClick={handleAiAssist} disabled={!newTerm} className="text-blue-600 text-sm self-start">AI 自动补全</button>
         <select value={newPart} onChange={(e) => setNewPart(e.target.value)} className="border rounded px-2 py-1">
           {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
         </select>
