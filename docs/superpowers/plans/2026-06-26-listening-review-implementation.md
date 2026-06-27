@@ -3932,7 +3932,9 @@ Run: `npm run dev`. Walk through, in order: log in → home page shows all 6 lin
 
 - [ ] **Step 3: ⚠️ HUMAN ACTION — confirm production env vars are set**
 
-In the Vercel project dashboard → Settings → Environment Variables, confirm `POSTGRES_URL` (and siblings), `ANTHROPIC_API_KEY`, and `APP_PASSWORD` are all present for the **Production** environment specifically (Task 1 set them, but double-check the environment checkbox — it's easy to add a var only to Preview/Development by mistake).
+In the Vercel project dashboard → Settings → Environment Variables, confirm `POSTGRES_URL` (and siblings), `ANTHROPIC_API_KEY`, and `APP_PASSWORD` are all present for the **Production** environment specifically — don't trust this by memory even if an earlier task already set them. In this implementation, `POSTGRES_URL` ended up missing from Production specifically (present for Preview/Development only) after an unrelated `vercel env rm POSTGRES_URL preview` during Task 1's troubleshooting apparently deleted the single combined Preview+Production record rather than un-tagging just Preview — every Production deployment had a silently broken database connection until this was caught and fixed (`vercel env add POSTGRES_URL production --value=... --no-sensitive --yes`) here in Task 18. Check with `vercel env ls` and look at the `environments` column for each variable individually, not just whether the variable name appears at all.
+
+Also confirm **Deployment Protection** (Vercel project → Settings → Deployment Protection → "Vercel Authentication") is fully **Disabled**, not just "Only Preview Deployments" — the scoped option did not exempt this project's canonical `.vercel.app` domain in this implementation, and left the entire site (including Production) behind a Vercel-account login wall on top of the app's own password, contradicting the spec's intended single-shared-password access model.
 
 - [ ] **Step 4: Deploy**
 
@@ -3941,11 +3943,11 @@ Run:
 git push
 vercel --prod
 ```
-Or simply push to the `main`/`master` branch — Vercel's GitHub integration auto-deploys on push if that's how the project was connected in Task 1.
+Or simply push to the `main`/`master` branch — Vercel's GitHub integration auto-deploys on push if that's how the project was connected in Task 1. Note: if this branch was already the project's designated Production branch since Task 1 (true in this implementation, since it was the only branch on GitHub at import time), every prior push throughout the whole project has already been deploying to Production — this step isn't a single first-time "go live" event in that case, just confirmation that the latest commit is live.
 
 - [ ] **Step 5: Production smoke test**
 
-Open the production URL Vercel prints (or shown in the dashboard) on a phone or another browser. Confirm: `/login` gate works, logging in works, `/review` loads (even if empty), `/knowledge-points/import` can upload a real file and write to the **production** database (the same one used in dev, since Task 1 set up one shared dev/prod Postgres — confirm this is the intended setup; if the user wants prod data kept separate from whatever test rows accumulated during development, manually clean up test rows now via a one-off `DELETE FROM knowledge_points WHERE term IN (...)` for anything created during Tasks 1–17's manual verification steps).
+Get the **actual** production URL from the Vercel dashboard (next to "Visit") rather than guessing the domain pattern from the project name — Vercel appends a random suffix (e.g. `-xi`) when the plain project-name subdomain is already taken by an unrelated project, and testing a guessed-wrong domain can produce a misleading Vercel SSO redirect that looks identical to a real Deployment Protection failure. Confirm: `/login` gate works, logging in works (`POST /api/auth` with the real `APP_PASSWORD` → `{"ok":true}`), an authenticated DB-backed endpoint like `GET /api/stats` returns the correct empty-state shape (not a connection error — this is what would have caught the `POSTGRES_URL` gap above), an unauthenticated request to `/` redirects to `/login` specifically (not to `vercel.com/sso-api` — that would mean Deployment Protection is still on), and `/knowledge-points/import` can upload a real file and write to the **production** database (the same one used in dev, since Task 1 set up one shared dev/prod Postgres — confirm this is the intended setup; if the user wants prod data kept separate from whatever test rows accumulated during development, manually clean up test rows now via a one-off `DELETE FROM knowledge_points WHERE term IN (...)` for anything created during Tasks 1–18's manual verification steps).
 
 - [ ] **Step 6: Commit**
 
