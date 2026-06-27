@@ -2882,6 +2882,8 @@ export default function ImportPage() {
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = ''; // reset now (the captured `file` above is unaffected) so re-selecting the
+    // same filename later still fires onChange -- browsers otherwise treat it as "no change"
     setError('');
     const form = new FormData();
     form.append('file', file);
