@@ -24,6 +24,7 @@ Spec reference: `docs/superpowers/specs/2026-06-26-listening-review-design.md` (
 - This project runs Next.js 16 (confirmed via `package.json` after scaffolding in Task 1), which has two breaking changes versus older App Router conventions that every later task must follow: (1) dynamic route handler `params` is a `Promise` — write `{ params }: { params: Promise<{ id: string }> }` and `const { id } = await params;`, never the old synchronous `{ params: { id: string } }`; (2) `middleware.ts` is renamed to `proxy.ts` with the exported function named `proxy`, not `middleware` (Task 8 creates this; later tasks just rely on it existing, no action needed). `next.config.ts` (not `.js`) is what Task 1's scaffold actually produces — keep it as `.ts`.
 - Any script or test that needs `POSTGRES_URL`/`ANTHROPIC_API_KEY`/`APP_PASSWORD` must load them with `import { config } from 'dotenv'; config({ path: '.env.local' });` — never the bare `import 'dotenv/config'`, which only loads a file literally named `.env` and silently leaves every var undefined against the `.env.local` that `vercel env pull` actually writes (confirmed by hitting this in Task 1).
 - `.env.local` in this worktree already has real values for `POSTGRES_URL`, `ANTHROPIC_API_KEY`, and `APP_PASSWORD` (set up during Task 1) — no later task needs to fetch or re-pull these. If a task's manual-verification step ever finds one missing/empty after running `vercel env pull`, that's because Vercel's "Sensitive" environment variable type returns empty on CLI pull by design; re-add the var with `vercel env add NAME preview --value=... --no-sensitive --yes` rather than assuming the credential itself is wrong.
+- Always import `sql`/`createClient` from `'@/lib/db'` (or the relative equivalent in test files, e.g. `'../../src/lib/db'`) — never directly from `'@vercel/postgres'`. `db.ts` (Task 6) registers a passthrough type parser for Postgres `DATE` columns that prevents a real timezone-corruption bug (see Task 6); importing the raw package bypasses that fix silently. `import type { VercelClient }` (type-only) is fine to keep from the raw package since type imports have no runtime effect.
 - `@vercel/postgres` prints a deprecation warning on install ("choose an alternate storage solution... migrated to Neon as a native Vercel integration") — this is expected and not a bug to fix. It was verified working end-to-end in Task 1 against the actual Neon-backed database this project provisioned through Vercel's Storage tab; keep using `sql`/`createClient` from `@vercel/postgres` exactly as every task already specifies. Do not switch to `@neondatabase/serverless` or any other client.
 - The Vercel project (`navibius-projects/toeic-review`) currently deploys from the `worktree-toeic-review-impl` git branch, not `main`/`master` — Preview deployments build from this branch automatically on push. This is intentional during implementation; Task 18 / the eventual merge to the main branch is what's expected to produce the real Production deployment.
 
@@ -345,18 +346,39 @@ Expected: `Applied 0001_init.sql`
 
 - [ ] **Step 4: Write the test transaction helper**
 
-Create `tests/integration/setup.ts`. Same dotenv note as the scripts above — load `.env.local` explicitly:
+Create `tests/integration/setup.ts`. Same dotenv note as the scripts above — load `.env.local` explicitly. Two things this needs beyond the obvious BEGIN/ROLLBACK wrapper: (1) wrap each query in a savepoint, not a bare transaction — Postgres aborts the whole transaction after any failed statement (e.g. a CHECK-constraint violation a test deliberately triggers), so a later query in the same test body would otherwise fail with "current transaction is aborted" even though the test expects it to succeed; (2) side-effect-import `'../../src/lib/db'` directly (not just relying on some other imported module to pull it in transitively) so this helper's DATE columns are never corrupted by `node-postgres`'s local-timezone DATE parsing, regardless of which test file calls it or which Vitest worker that file runs in (`src/lib/db.ts` itself is built in Task 6 — at this point in Task 2 the file doesn't exist yet, so this import is a forward reference; Task 6 creates the file Task 2 already linked here, and re-running this file's test after Task 6 is what actually proves the registration takes effect):
 
 ```typescript
 import { config } from 'dotenv';
 config({ path: '.env.local' });
-import { createClient, type VercelClient } from '@vercel/postgres';
+import type { VercelClient } from '@vercel/postgres';
+import { createClient } from '../../src/lib/db'; // importing createClient from here (not '@vercel/postgres' directly)
+// guarantees the DATE type-parser fix (see src/lib/db.ts) is registered before any test query runs,
+// independent of whether the test file under execution happens to import a module that pulls it in transitively.
 
 export async function withTestClient(fn: (client: VercelClient) => Promise<void>) {
   const client = createClient();
   await client.connect();
   try {
     await client.query('BEGIN');
+    let savepointCounter = 0;
+
+    // Wrap client.query to auto-rollback failed queries to savepoint
+    const originalQuery = client.query.bind(client);
+    (client as any).query = async function(
+      text: string,
+      values?: any[],
+    ) {
+      const spName = `sp_${++savepointCounter}`;
+      await originalQuery(`SAVEPOINT ${spName}`);
+      try {
+        return await originalQuery(text, values);
+      } catch (err) {
+        await originalQuery(`ROLLBACK TO SAVEPOINT ${spName}`);
+        throw err;
+      }
+    };
+
     await fn(client);
   } finally {
     await client.query('ROLLBACK');
@@ -937,9 +959,13 @@ git push
 
 - [ ] **Step 1: Add the `db.ts` re-export**
 
-Create `src/lib/db.ts`:
+Create `src/lib/db.ts`. This is the ONLY file in the project allowed to import `sql`/`createClient` directly from `'@vercel/postgres'` — every other file imports them from `'@/lib/db'` instead, because this file also fixes a real bug: `node-postgres`'s default type parser converts Postgres `DATE` columns into JS `Date` objects constructed in the host machine's LOCAL timezone, which corrupts every date by one calendar day on any non-UTC host (confirmed on this dev machine, UTC+8 — `'2026-06-20'::date` came back as `2026-06-19T16:00:00.000Z`). Registering a passthrough type parser fixes this once, process-wide:
 
 ```typescript
+import { types } from '@vercel/postgres';
+
+types.setTypeParser(types.builtins.DATE, (value: string) => value);
+
 export { sql, createClient } from '@vercel/postgres';
 ```
 
@@ -1128,10 +1154,11 @@ Expected: FAIL with "Cannot find module '../../src/lib/knowledgePoints'"
 
 - [ ] **Step 4: Implement `knowledgePoints.ts`**
 
-Create `src/lib/knowledgePoints.ts`:
+Create `src/lib/knowledgePoints.ts`. The bare `import './db';` below is a side-effect-only import — it has no named imports because its only job is to guarantee `db.ts`'s DATE type-parser registration (Step 1) has run before any query in this file executes:
 
 ```typescript
 import type { VercelClient } from '@vercel/postgres';
+import './db';
 import { normalizeTerm } from './termNormalize';
 import { applyCorrectAnswer, applyWrongAnswer, type SrsState } from './srs';
 
@@ -1783,7 +1810,7 @@ Create `tests/integration/knowledgePointsApi.test.ts`:
 
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { sql } from '@vercel/postgres';
+import { sql } from '../../src/lib/db';
 import { POST as createRoute, GET as listRoute } from '../../src/app/api/knowledge-points/route';
 import { PATCH as patchRoute } from '../../src/app/api/knowledge-points/[id]/route';
 import { NextRequest } from 'next/server';
@@ -1864,7 +1891,7 @@ Expected: FAIL with "Cannot find module '../../src/app/api/knowledge-points/rout
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { insertKnowledgePoint, listKnowledgePoints } from '@/lib/knowledgePoints';
 import { sanitizeScenario, isValidScenario } from '@/lib/scenarios';
 import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
@@ -1921,7 +1948,7 @@ export async function GET(req: NextRequest) {
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { updateKnowledgePointFields, softDeleteKnowledgePoint, restoreKnowledgePoint } from '@/lib/knowledgePoints';
 import { isValidScenario } from '@/lib/scenarios';
 import { todayInShanghai } from '@/lib/dateUtils';
@@ -2611,7 +2638,7 @@ Create `tests/integration/importApi.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { sql } from '@vercel/postgres';
+import { sql } from '../../src/lib/db';
 
 vi.mock('@/lib/importParser', () => ({
   parseImportDocument: vi.fn(async () => [{
@@ -2698,7 +2725,7 @@ Create `src/app/api/knowledge-points/import/route.ts`:
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import Anthropic from '@anthropic-ai/sdk';
 import { extractText, UnsupportedFileTypeError, FileTooLargeError } from '@/lib/fileExtract';
 import { parseImportDocument } from '@/lib/importParser';
@@ -2767,7 +2794,7 @@ Create `src/app/api/knowledge-points/import/confirm/route.ts`:
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { applyConfirmedImportItem } from '@/lib/importConfirm';
 import { todayInShanghai } from '@/lib/dateUtils';
 
@@ -2966,7 +2993,7 @@ Create `tests/integration/reviewApi.test.ts`:
 
 ```typescript
 import { describe, it, expect, afterEach } from 'vitest';
-import { sql } from '@vercel/postgres';
+import { sql } from '../../src/lib/db';
 import { GET as queueRoute } from '../../src/app/api/review/queue/route';
 import { POST as answerRoute } from '../../src/app/api/review/[id]/answer/route';
 import { NextRequest } from 'next/server';
@@ -3036,7 +3063,7 @@ Create `src/app/api/review/queue/route.ts`:
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { getTodayQueue } from '@/lib/knowledgePoints';
 import { todayInShanghai } from '@/lib/dateUtils';
 
@@ -3062,7 +3089,7 @@ Create `src/app/api/review/[id]/answer/route.ts`:
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { applyReviewResult } from '@/lib/knowledgePoints';
 import { todayInShanghai } from '@/lib/dateUtils';
 
@@ -3336,7 +3363,7 @@ Create `tests/integration/mockExamsApi.test.ts`:
 
 ```typescript
 import { describe, it, expect, afterEach } from 'vitest';
-import { sql } from '@vercel/postgres';
+import { sql } from '../../src/lib/db';
 import { POST as createRoute, GET as listRoute } from '../../src/app/api/mock-exams/route';
 import { NextRequest } from 'next/server';
 
@@ -3395,7 +3422,7 @@ Create `src/app/api/mock-exams/route.ts`:
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { createMockExam, listMockExams } from '@/lib/mockExams';
 
 export async function POST(req: NextRequest) {
@@ -3683,7 +3710,7 @@ Create `src/app/api/stats/route.ts`:
 
 ```typescript
 import { NextResponse } from 'next/server';
-import { createClient } from '@vercel/postgres';
+import { createClient } from '@/lib/db';
 import { getKnowledgePointStats } from '@/lib/stats';
 
 export async function GET() {
@@ -3701,7 +3728,7 @@ Create `src/app/api/export/route.ts`:
 
 ```typescript
 import { NextResponse } from 'next/server';
-import { sql } from '@vercel/postgres';
+import { sql } from '@/lib/db';
 
 export async function GET() {
   const [kp, mockResults, mockScores] = await Promise.all([
