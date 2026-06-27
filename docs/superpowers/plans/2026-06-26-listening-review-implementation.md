@@ -26,6 +26,8 @@ Spec reference: `docs/superpowers/specs/2026-06-26-listening-review-design.md` (
 - `.env.local` in this worktree already has real values for `POSTGRES_URL`, `ANTHROPIC_API_KEY`, and `APP_PASSWORD` (set up during Task 1) — no later task needs to fetch or re-pull these. If a task's manual-verification step ever finds one missing/empty after running `vercel env pull`, that's because Vercel's "Sensitive" environment variable type returns empty on CLI pull by design; re-add the var with `vercel env add NAME preview --value=... --no-sensitive --yes` rather than assuming the credential itself is wrong.
 - Always import `sql`/`createClient` from `'@/lib/db'` (or the relative equivalent in test files, e.g. `'../../src/lib/db'`) — never directly from `'@vercel/postgres'`. `db.ts` (Task 6) registers a passthrough type parser for Postgres `DATE` columns that prevents a real timezone-corruption bug, and (as of Task 9) also loads `.env.local`; importing the raw package bypasses both fixes silently. `import type { VercelClient }` (type-only) is fine to keep from the raw package since type imports have no runtime effect.
 - `@vercel/postgres` prints a deprecation warning on install ("choose an alternate storage solution... migrated to Neon as a native Vercel integration") — this is expected and not a bug to fix. It was verified working end-to-end in Task 1 against the actual Neon-backed database this project provisioned through Vercel's Storage tab; keep using `sql`/`createClient` from `@vercel/postgres` exactly as every task already specifies. Do not switch to `@neondatabase/serverless` or any other client.
+- This sandboxed dev environment proxies outbound HTTP through `HTTP_PROXY`/`HTTPS_PROXY=http://127.0.0.1:18081`, but Node 24's native `fetch`/undici (used by `@anthropic-ai/sdk` and Next.js route handlers) does not honor those vars unless `NODE_USE_ENV_PROXY=1` is also set — without it, any real call to `api.anthropic.com` silently bypasses the proxy and gets blocked at the sandbox boundary with a `403`/`401`-shaped error that looks like an Anthropic auth failure but isn't one (confirmed in Task 10: curl succeeded with the same key while the SDK failed, because curl always honors proxy env vars and Node's fetch didn't). This is already fixed at the shell level for this machine (`node`/`npm`/`npx` wrapper scripts under `~/.local/bin` export `NODE_USE_ENV_PROXY=1` before exec'ing the real binary) — no task needs to set this itself. If a future manual test against the real Anthropic API ever gets an inexplicable 401/403 that contradicts a direct curl test with the same key, this is the first thing to check, not the API key or billing.
+- `pdf-parse@2.x` (the version actually installed) is a breaking rewrite of `pdf-parse@1.x`'s API — no default-export function, instead a named `PDFParse` class with `getText()`/`destroy()` (Task 10 already corrected this; see Task 10's `fileExtract.ts` code).
 - The Vercel project (`navibius-projects/toeic-review`) currently deploys from the `worktree-toeic-review-impl` git branch, not `main`/`master` — Preview deployments build from this branch automatically on push. This is intentional during implementation; Task 18 / the eventual merge to the main branch is what's expected to produce the real Production deployment.
 
 ---
@@ -2140,10 +2142,10 @@ Expected: FAIL with "Cannot find module '../../src/lib/fileExtract'"
 
 - [ ] **Step 3: Implement `fileExtract.ts`**
 
-Create `src/lib/fileExtract.ts`:
+Create `src/lib/fileExtract.ts`. Note: `pdf-parse@2.x` (what's actually installed) is a breaking rewrite from the `pdf-parse@1.x` API most training data assumes — there is no default-export function; it's a named `PDFParse` class with `getText()`/`destroy()`:
 
 ```typescript
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 
 export class UnsupportedFileTypeError extends Error {}
@@ -2164,8 +2166,13 @@ export function validateUpload(filename: string, byteLength: number): 'pdf' | 'd
 export async function extractText(filename: string, buffer: Buffer): Promise<string> {
   const kind = validateUpload(filename, buffer.byteLength);
   if (kind === 'pdf') {
-    const result = await pdfParse(buffer);
-    return result.text;
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const result = await parser.getText();
+      return result.text;
+    } finally {
+      await parser.destroy();
+    }
   }
   const result = await mammoth.extractRawText({ buffer });
   return result.value;
