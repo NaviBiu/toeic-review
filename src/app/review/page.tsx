@@ -46,6 +46,13 @@ export default function ReviewPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ correct: guess === 'remember' }),
       });
+      // A wrong answer stays due today on the backend (src/lib/srs.ts) instead
+      // of moving to tomorrow -- re-appending it here makes it actually
+      // resurface within this same sitting instead of only on next page load,
+      // so today's session can't be finished on it until it's answered right.
+      if (guess === 'forgot') {
+        setQueue((q) => [...q, current]);
+      }
     }
     setIndex((i) => i + 1);
     setPhase('guessing');

@@ -50,14 +50,22 @@ describe('applyCorrectAnswer', () => {
 });
 
 describe('applyWrongAnswer', () => {
-  it('resets correctStreak to 0 and schedules tomorrow', () => {
+  it('resets correctStreak to 0 and stays due today (not tomorrow)', () => {
     let state = freshState();
     state = applyCorrectAnswer(state, TODAY);
     state = applyCorrectAnswer(state, TODAY);
     state = applyWrongAnswer(state, TODAY);
     expect(state.correctStreak).toBe(0);
-    expect(state.nextReviewDate).toBe('2026-06-27');
+    expect(state.nextReviewDate).toBe(TODAY);
     expect(state.status).toBe('active');
+  });
+
+  it('a same-day correction afterwards still schedules from day 1, like any first correct answer', () => {
+    let state = freshState();
+    state = applyWrongAnswer(state, TODAY);
+    state = applyCorrectAnswer(state, TODAY);
+    expect(state.correctStreak).toBe(1);
+    expect(state.nextReviewDate).toBe('2026-06-27');
   });
 
   it('increments wrongCount', () => {

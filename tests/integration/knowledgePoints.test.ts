@@ -86,14 +86,14 @@ describe('applyReviewResult', () => {
     });
   });
 
-  it('resets correctStreak to 0 on a wrong answer', async () => {
+  it('resets correctStreak to 0 on a wrong answer and stays due today (not tomorrow)', async () => {
     await withTestClient(async (client) => {
       const kp = await insertKnowledgePoint(client, BASE);
       await applyReviewResult(client, kp.id, true, '2026-06-20');
       const result = await applyReviewResult(client, kp.id, false, '2026-06-20');
       expect(result.correctStreak).toBe(0);
       expect(result.wrongCount).toBe(1);
-      expect(result.nextReviewDate).toBe('2026-06-21');
+      expect(result.nextReviewDate).toBe('2026-06-20');
     });
   });
 });
@@ -123,6 +123,9 @@ describe('softDeleteKnowledgePoint / restoreKnowledgePoint', () => {
 
 describe('updateKnowledgePointFields', () => {
   it('updating meaning/example/notes does not touch status or next_review_date', async () => {
+    // 7 sequential round trips to reach mastered status genuinely takes
+    // 10s+ against Neon's non-pooled endpoint -- bump past the 15s default
+    // rather than let this flake on connection latency.
     await withTestClient(async (client) => {
       const kp = await insertKnowledgePoint(client, BASE);
       await applyReviewResult(client, kp.id, true, '2026-06-20');
@@ -131,7 +134,7 @@ describe('updateKnowledgePointFields', () => {
       expect(updated.status).toBe('mastered');
       expect(updated.meaning).toBe('新释义');
     });
-  });
+  }, 30000);
 
   it('updating part/scenario rejects a change that collides with another existing record', async () => {
     await withTestClient(async (client) => {

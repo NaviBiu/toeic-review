@@ -26,6 +26,9 @@ export function applyWrongAnswer(state: SrsState, today: string): SrsState {
     correctStreak: 0,
     wrongCount: state.wrongCount + 1,
     status: 'active',
-    nextReviewDate: addDays(today, 1),
+    // Stays due today (not tomorrow) so it re-enters today's review queue
+    // instead of escaping until the next day -- the user must get it right
+    // at least once today before today's session can end on it.
+    nextReviewDate: today,
   };
 }
