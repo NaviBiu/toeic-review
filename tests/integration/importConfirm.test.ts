@@ -56,4 +56,16 @@ describe('applyConfirmedImportItem', () => {
       expect(result.action).toBe('wrong_again');
     });
   });
+
+  it('rejects action insert_new with an invalid scenarioMajor/scenarioMinor pair', async () => {
+    await withTestClient(async (client) => {
+      await expect(
+        applyConfirmedImportItem(
+          client,
+          { ...BASE, scenarioMajor: '股票', scenarioMinor: '投资', decision: { action: 'insert_new' }, existingId: null },
+          '2026-06-26'
+        )
+      ).rejects.toThrow('场景分类不在允许的列表内');
+    });
+  });
 });

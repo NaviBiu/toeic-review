@@ -142,6 +142,36 @@ describe('updateKnowledgePointFields', () => {
       ).rejects.toThrow();
     });
   });
+
+  it('rejects a partial update that changes only scenarioMinor into an invalid combination with the existing scenarioMajor', async () => {
+    await withTestClient(async (client) => {
+      const kp = await insertKnowledgePoint(client, BASE);
+      await expect(
+        updateKnowledgePointFields(client, kp.id, { scenarioMinor: '不存在的小分类' })
+      ).rejects.toThrow('场景分类不在允许的列表内');
+    });
+  });
+
+  it('silently ignores an unknown field key instead of throwing a SQL error', async () => {
+    await withTestClient(async (client) => {
+      const kp = await insertKnowledgePoint(client, BASE);
+      const updated = await updateKnowledgePointFields(client, kp.id, {
+        meaning: '已更新',
+        ...({ foo: 'bar' } as any),
+      });
+      expect(updated.meaning).toBe('已更新');
+    });
+  });
+});
+
+describe('insertKnowledgePoint scenario validation', () => {
+  it('throws when given an invalid major/minor pair', async () => {
+    await withTestClient(async (client) => {
+      await expect(
+        insertKnowledgePoint(client, { ...BASE, scenarioMajor: '股票', scenarioMinor: '投资' })
+      ).rejects.toThrow('场景分类不在允许的列表内');
+    });
+  });
 });
 
 describe('listKnowledgePoints / getTodayQueue', () => {

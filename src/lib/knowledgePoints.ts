@@ -2,6 +2,7 @@ import type { VercelClient } from '@vercel/postgres';
 import './db'; // registers the DATE type-parser fix (see db.ts) before any query runs
 import { normalizeTerm } from './termNormalize';
 import { applyCorrectAnswer, applyWrongAnswer, type SrsState } from './srs';
+import { isValidScenario } from './scenarios';
 
 export type KnowledgePoint = {
   id: number;
@@ -75,6 +76,9 @@ export async function insertKnowledgePoint(
     dateAdded: string;
   }
 ): Promise<KnowledgePoint> {
+  if (!isValidScenario(data.scenarioMajor, data.scenarioMinor)) {
+    throw new Error('场景分类不在允许的列表内');
+  }
   const { rows } = await client.query(
     `INSERT INTO knowledge_points
        (term, meaning, example, notes, part, scenario_major, scenario_minor, skill, date_added, status, correct_streak, next_review_date)
@@ -169,6 +173,9 @@ export async function updateKnowledgePointFields(
     const candidatePart = fields.part ?? current.part;
     const candidateMajor = fields.scenarioMajor ?? current.scenarioMajor;
     const candidateMinor = fields.scenarioMinor ?? current.scenarioMinor;
+    if (!isValidScenario(candidateMajor, candidateMinor)) {
+      throw new Error('场景分类不在允许的列表内');
+    }
     const { rows: candidateRows } = await client.query(
       `SELECT term FROM knowledge_points
        WHERE id != $1 AND part = $2 AND scenario_major = $3 AND scenario_minor = $4 AND skill = $5 AND status != 'deleted'`,
@@ -194,6 +201,7 @@ export async function updateKnowledgePointFields(
     dateAdded: 'date_added',
   };
   for (const [key, value] of Object.entries(fields)) {
+    if (!(key in columnMap)) continue;
     setClauses.push(`${columnMap[key]} = $${i}`);
     values.push(value);
     i++;
