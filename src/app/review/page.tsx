@@ -86,47 +86,93 @@ export default function ReviewPage() {
   }
 
   return (
-    <main className="p-6 max-w-xl">
-      <div className="mb-4">
-        <select value={majorFilter} onChange={(e) => setMajorFilter(e.target.value)} className="border rounded px-2 py-1">
+    <main className="min-h-screen bg-stone-50">
+      <div className="mx-auto max-w-xl px-6 py-12">
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>
+          {queue.length > 0 && (
+            <span className="text-sm font-medium text-stone-400">
+              {Math.min(index + 1, queue.length)} / {queue.length}
+            </span>
+          )}
+        </div>
+
+        <select
+          value={majorFilter}
+          onChange={(e) => setMajorFilter(e.target.value)}
+          className="mb-6 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 shadow-sm"
+        >
           <option value="">全部场景</option>
           {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
+
+        {!current ? (
+          <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center shadow-sm">
+            <p className="text-2xl">🎉</p>
+            <p className="mt-3 text-stone-500">今天没有需要复盘的内容</p>
+          </div>
+        ) : (
+          <>
+            <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+              <p className="text-3xl font-bold text-stone-900">{current.term}</p>
+              {phase === 'guessing' && (
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={() => pickGuess('remember')}
+                    className="flex-1 rounded-xl bg-emerald-600 py-3 font-medium text-white shadow-sm transition hover:bg-emerald-700"
+                  >
+                    记得
+                  </button>
+                  <button
+                    onClick={() => pickGuess('forgot')}
+                    className="flex-1 rounded-xl bg-stone-200 py-3 font-medium text-stone-600 transition hover:bg-stone-300"
+                  >
+                    不记得
+                  </button>
+                </div>
+              )}
+              {phase === 'revealed' && (
+                <>
+                  <div className="mt-5 border-t border-stone-100 pt-5">
+                    <p className="text-stone-800">{current.meaning}</p>
+                    <p className="mt-2 text-sm text-stone-400 italic">{current.example}</p>
+                    {current.notes && <p className="mt-2 text-sm text-stone-400">{current.notes}</p>}
+                  </div>
+                  <div className="mt-6 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={
+                          'rounded-full px-3 py-1 text-sm font-medium ' +
+                          (guess === 'remember' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700')
+                        }
+                      >
+                        你的判断:{guess === 'remember' ? '记得' : '不记得'}
+                      </span>
+                      <button onClick={revoke} className="text-sm text-stone-400 underline hover:text-stone-600">
+                        撤回(改选)
+                      </button>
+                    </div>
+                    <button
+                      onClick={next}
+                      className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                    >
+                      下一个
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={handleDelete} className="mt-4 text-sm text-stone-400 hover:text-red-600">
+              删除(不需要再复习)
+            </button>
+          </>
+        )}
       </div>
 
-      {!current ? (
-        <p>今天没有需要复盘的内容</p>
-      ) : (
-        <>
-          <div className="border rounded p-6 mb-4">
-            <p className="text-2xl font-semibold mb-4">{current.term}</p>
-            {phase === 'guessing' && (
-              <div className="flex gap-3">
-                <button onClick={() => pickGuess('remember')} className="bg-green-600 text-white rounded px-4 py-2">记得</button>
-                <button onClick={() => pickGuess('forgot')} className="bg-gray-400 text-white rounded px-4 py-2">不记得</button>
-              </div>
-            )}
-            {phase === 'revealed' && (
-              <>
-                <p className="text-gray-700">{current.meaning}</p>
-                <p className="text-gray-500 text-sm mt-1">{current.example}</p>
-                {current.notes && <p className="text-gray-400 text-sm mt-1">{current.notes}</p>}
-                <div className="flex gap-3 mt-4 items-center">
-                  <span className="text-sm text-gray-500">你的判断:{guess === 'remember' ? '记得' : '不记得'}</span>
-                  <button onClick={revoke} className="text-sm text-gray-500 underline">撤回(改选)</button>
-                  <button onClick={next} className="bg-blue-600 text-white rounded px-4 py-2">下一个</button>
-                </div>
-              </>
-            )}
-          </div>
-          <button onClick={handleDelete} className="text-red-600 text-sm">删除(不需要再复习)</button>
-        </>
-      )}
-
       {undo && (
-        <div className="fixed bottom-4 left-4 bg-gray-800 text-white rounded px-4 py-2 flex gap-3 items-center">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-xl bg-stone-800 px-4 py-3 text-white shadow-lg">
           已删除「{undo.term}」
-          <button onClick={handleUndo} className="underline">撤销</button>
+          <button onClick={handleUndo} className="font-medium underline">撤销</button>
         </div>
       )}
     </main>
