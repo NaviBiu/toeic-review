@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Header from '@/components/Header';
+import { SCENARIOS } from '@/lib/scenarios';
 
 type Candidate = {
   term: string; meaning: string; example: string; notes: string | null; part: number;
@@ -94,17 +95,18 @@ export default function ImportPage() {
             <ul className="mb-4 flex flex-col gap-3">
               {candidates.map((c, i) => (
                 <li key={i} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={c.confirmed}
-                        onChange={(e) => updateCandidate(i, { confirmed: e.target.checked })}
-                        className="h-4 w-4 accent-indigo-600"
-                      />
-                      <span className="font-medium text-stone-900">{c.term}</span>
-                    </label>
-                    <span className="text-xs text-stone-400">Part {c.part} · {c.scenarioMajor}/{c.scenarioMinor}</span>
+                  <div className="mb-2 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={c.confirmed}
+                      onChange={(e) => updateCandidate(i, { confirmed: e.target.checked })}
+                      className="h-4 w-4 accent-indigo-600"
+                    />
+                    <input
+                      value={c.term}
+                      onChange={(e) => updateCandidate(i, { term: e.target.value })}
+                      className="flex-1 rounded-lg border border-stone-200 px-2 py-1 text-sm font-medium text-stone-900"
+                    />
                   </div>
                   {c.decision.action === 'skip_duplicate' && (
                     <p className="text-sm text-stone-400">与现有记录完全相同,已跳过</p>
@@ -115,11 +117,52 @@ export default function ImportPage() {
                   {(c.meaningWasAiGenerated || c.exampleWasAiGenerated) && (
                     <p className="text-sm text-indigo-600">释义/例句由 AI 补充,请检查</p>
                   )}
+
+                  <label className="mt-2 block text-xs text-stone-400">释义</label>
                   <textarea
                     value={c.meaning}
                     onChange={(e) => updateCandidate(i, { meaning: e.target.value })}
-                    className="mt-2 w-full rounded-xl border border-stone-200 p-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-stone-200 p-2 text-sm"
                   />
+
+                  <label className="mt-2 block text-xs text-stone-400">例句</label>
+                  <textarea
+                    value={c.example}
+                    onChange={(e) => updateCandidate(i, { example: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-stone-200 p-2 text-sm"
+                  />
+
+                  <label className="mt-2 block text-xs text-stone-400">备注(可留空)</label>
+                  <textarea
+                    value={c.notes ?? ''}
+                    onChange={(e) => updateCandidate(i, { notes: e.target.value || null })}
+                    className="mt-1 w-full rounded-xl border border-stone-200 p-2 text-sm"
+                  />
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <select
+                      value={c.part}
+                      onChange={(e) => updateCandidate(i, { part: Number(e.target.value) })}
+                      className="rounded-lg border border-stone-200 px-2 py-1 text-sm"
+                    >
+                      {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
+                    </select>
+                    <select
+                      value={c.scenarioMajor}
+                      onChange={(e) => updateCandidate(i, { scenarioMajor: e.target.value, scenarioMinor: '未分类' })}
+                      className="rounded-lg border border-stone-200 px-2 py-1 text-sm"
+                    >
+                      {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <select
+                      value={c.scenarioMinor}
+                      onChange={(e) => updateCandidate(i, { scenarioMinor: e.target.value })}
+                      className="rounded-lg border border-stone-200 px-2 py-1 text-sm"
+                    >
+                      {[...(SCENARIOS[c.scenarioMajor] ?? []), '未分类'].map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+
                   {c.decision.action === 'wrong_again' && c.decision.textConflict && (
                     <div className="mt-2 flex gap-4 text-sm text-stone-600">
                       <label className="flex items-center gap-1">
