@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { sanitizeScenario } from './scenarios';
 
+export class TruncatedAiResponseError extends Error {}
+
 export type ParsedCandidate = {
   term: string;
   meaning: string;
@@ -64,20 +66,85 @@ ${taxonomyText}
 调用 record_knowledge_points 工具返回结果,不要输出额外文字。`;
 }
 
-export async function parseImportDocument(
+const ENTRY_LINE = /^\s*\d+[.、)]\s*\S/;
+
+// A single AI call truncates well before a real day's volume: 4096 tokens
+// truncated at 123 entries, and even 16000 still truncated the same
+// document while taking 150s+ -- generation-bound, not fixable by raising
+// the cap further without an unusably long wait. Confirmed 2026-06-28 that
+// a single call comfortably handles ~20 entries (succeeded at 4096 tokens
+// in production), so splitting into same-sized batches and calling the AI
+// once per batch, in parallel, keeps each call inside its proven-safe
+// range regardless of the total document size.
+export const MAX_ENTRIES_PER_BATCH = 20;
+
+// Splits raw note text into self-contained chunks of at most
+// MAX_ENTRIES_PER_BATCH numbered entries each. A "segment" is the context
+// lines (Part header, 时间 line, anything else) immediately preceding a
+// run of entries; splitting only ever happens between entries, never
+// inside one, and every resulting chunk keeps its segment's context lines
+// prepended so the AI still sees which Part/date a batch belongs to even
+// when that segment had to be split across multiple calls.
+export function splitIntoBatches(rawText: string, maxEntriesPerBatch = MAX_ENTRIES_PER_BATCH): string[] {
+  // Blank lines are common as visual separators between entries and carry
+  // no structural meaning -- without dropping them, a blank line between
+  // two entries of the same segment would look like a new context line
+  // and incorrectly start a fresh (header-less) segment mid-list.
+  const lines = rawText.split('\n').filter((line) => line.trim() !== '');
+  const segments: { context: string[]; entries: string[] }[] = [];
+  let current: { context: string[]; entries: string[] } | null = null;
+
+  for (const line of lines) {
+    if (ENTRY_LINE.test(line)) {
+      if (!current) {
+        current = { context: [], entries: [] };
+        segments.push(current);
+      }
+      current.entries.push(line);
+    } else {
+      // A context line after entries have already started signals a new
+      // segment (e.g. the next "Part" header) -- start fresh so it isn't
+      // attributed to the segment before it.
+      if (current && current.entries.length > 0) {
+        current = null;
+      }
+      if (!current) {
+        current = { context: [], entries: [] };
+        segments.push(current);
+      }
+      current.context.push(line);
+    }
+  }
+
+  const chunks: string[] = [];
+  for (const segment of segments) {
+    if (segment.entries.length === 0) continue;
+    for (let i = 0; i < segment.entries.length; i += maxEntriesPerBatch) {
+      const batchEntries = segment.entries.slice(i, i + maxEntriesPerBatch);
+      chunks.push([...segment.context, ...batchEntries].join('\n'));
+    }
+  }
+  return chunks;
+}
+
+async function parseChunk(
   client: Pick<Anthropic, 'messages'>,
-  rawText: string,
+  chunkText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<ParsedCandidate[]> {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: buildSystemPrompt(scenarioTaxonomy, fallbackDate),
-    messages: [{ role: 'user', content: rawText }],
+    messages: [{ role: 'user', content: chunkText }],
     tools: [EXTRACT_TOOL as any],
     tool_choice: { type: 'tool', name: 'record_knowledge_points' },
   } as any);
+
+  if ((response as any).stop_reason === 'max_tokens') {
+    throw new TruncatedAiResponseError('笔记条目太多,AI 解析在生成结果时被截断,请减少单次上传的条目数量后重试');
+  }
 
   const toolUse: any = (response as any).content.find((block: any) => block.type === 'tool_use');
   if (!toolUse) {
@@ -101,6 +168,23 @@ export async function parseImportDocument(
       exampleWasAiGenerated: !!item.exampleWasAiGenerated,
     };
   });
+}
+
+export async function parseImportDocument(
+  client: Pick<Anthropic, 'messages'>,
+  rawText: string,
+  fallbackDate: string,
+  scenarioTaxonomy: Record<string, string[]>
+): Promise<ParsedCandidate[]> {
+  const chunks = splitIntoBatches(rawText);
+  // No numbered entries detected (e.g. a single-term lookup from
+  // suggestForTerm) -- fall back to sending the whole text as one chunk
+  // rather than silently returning nothing.
+  const effectiveChunks = chunks.length > 0 ? chunks : [rawText];
+  const results = await Promise.all(
+    effectiveChunks.map((chunk) => parseChunk(client, chunk, fallbackDate, scenarioTaxonomy))
+  );
+  return results.flat();
 }
 
 export async function suggestForTerm(

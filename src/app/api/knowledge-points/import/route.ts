@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/db';
 import Anthropic from '@anthropic-ai/sdk';
 import { extractText, UnsupportedFileTypeError, FileTooLargeError } from '@/lib/fileExtract';
-import { parseImportDocument } from '@/lib/importParser';
+import { parseImportDocument, TruncatedAiResponseError } from '@/lib/importParser';
 import { findMatch } from '@/lib/knowledgePoints';
 import { decideDedup } from '@/lib/importDedup';
 import { SCENARIOS } from '@/lib/scenarios';
@@ -39,7 +39,10 @@ export async function POST(req: NextRequest) {
   let candidates;
   try {
     candidates = await parseImportDocument(anthropic, rawText, today, SCENARIOS);
-  } catch {
+  } catch (err) {
+    if (err instanceof TruncatedAiResponseError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     return NextResponse.json({ error: '解析失败,请重试' }, { status: 502 });
   }
 
