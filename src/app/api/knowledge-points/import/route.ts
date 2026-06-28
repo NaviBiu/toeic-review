@@ -8,6 +8,13 @@ import { decideDedup } from '@/lib/importDedup';
 import { SCENARIOS } from '@/lib/scenarios';
 import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
 
+// A real multi-entry document (measured: ~30s for 20 entries) can exceed
+// the platform's default function duration well before the AI finishes
+// parsing -- found 2026-06-28 when a real upload silently produced no
+// response. Vercel clamps this to whatever the actual plan allows, so
+// requesting more than the account supports is harmless.
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File | null;

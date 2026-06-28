@@ -16,6 +16,7 @@ export default function ImportPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState('');
   const [results, setResults] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -23,15 +24,32 @@ export default function ImportPage() {
     e.target.value = ''; // reset now (the captured `file` above is unaffected) so re-selecting the
     // same filename later still fires onChange -- browsers otherwise treat it as "no change"
     setError('');
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch('/api/knowledge-points/import', { method: 'POST', body: form });
-    const body = await res.json();
-    if (!res.ok) {
-      setError(body.error ?? '解析失败,请重试');
-      return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      // AI parsing a real multi-entry document can genuinely take 20-30s+
+      // (measured against production) -- without the loading state above,
+      // this entire wait looked identical to "nothing happened".
+      const res = await fetch('/api/knowledge-points/import', { method: 'POST', body: form });
+      let body: any;
+      try {
+        body = await res.json();
+      } catch {
+        throw new Error('服务器返回了无法识别的内容,请重试');
+      }
+      if (!res.ok) {
+        setError(body.error ?? '解析失败,请重试');
+        return;
+      }
+      setCandidates(body.candidates.map((c: any) => ({ ...c, confirmed: c.decision.action !== 'skip_duplicate', keepVersion: 'new' })));
+    } catch (err: any) {
+      // Covers network drops / timeouts -- previously unhandled, so a failed
+      // fetch produced no feedback at all.
+      setError(err.message ?? '网络错误,请重试');
+    } finally {
+      setUploading(false);
     }
-    setCandidates(body.candidates.map((c: any) => ({ ...c, confirmed: c.decision.action !== 'skip_duplicate', keepVersion: 'new' })));
   }
 
   function updateCandidate(i: number, patch: Partial<Candidate>) {
@@ -55,10 +73,19 @@ export default function ImportPage() {
       <div className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="mb-6 text-xl font-bold text-stone-900">导入错题笔记</h1>
 
-        <label className="mb-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-stone-300 bg-white p-8 text-center shadow-sm hover:border-indigo-300">
-          <span className="text-2xl">📄</span>
-          <span className="mt-2 text-sm font-medium text-stone-600">点击选择 PDF / Word 文件</span>
-          <input type="file" accept=".pdf,.docx,.doc" onChange={handleUpload} className="hidden" />
+        <label
+          className={
+            'mb-6 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center shadow-sm ' +
+            (uploading
+              ? 'cursor-not-allowed border-stone-200 bg-stone-100'
+              : 'cursor-pointer border-stone-300 bg-white hover:border-indigo-300')
+          }
+        >
+          <span className="text-2xl">{uploading ? '⏳' : '📄'}</span>
+          <span className="mt-2 text-sm font-medium text-stone-600">
+            {uploading ? 'AI 正在解析,可能需要 30 秒以上,请耐心等待…' : '点击选择 PDF / Word(.docx)文件'}
+          </span>
+          <input type="file" accept=".pdf,.docx" onChange={handleUpload} disabled={uploading} className="hidden" />
         </label>
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 

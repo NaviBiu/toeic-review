@@ -13,6 +13,9 @@ describe('validateUpload', () => {
   it('rejects an unsupported extension', () => {
     expect(() => validateUpload('notes.txt', 1000)).toThrow(UnsupportedFileTypeError);
   });
+  it('rejects legacy .doc with an actionable message (mammoth cannot read the binary OLE2 format)', () => {
+    expect(() => validateUpload('notes.doc', 1000)).toThrow(/另存为.*docx/);
+  });
   it('rejects a file over the 5MB limit', () => {
     expect(() => validateUpload('notes.pdf', 6 * 1024 * 1024)).toThrow(FileTooLargeError);
   });

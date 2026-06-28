@@ -12,8 +12,15 @@ export function validateUpload(filename: string, byteLength: number): 'pdf' | 'd
   }
   const lower = filename.toLowerCase();
   if (lower.endsWith('.pdf')) return 'pdf';
-  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return 'docx';
-  throw new UnsupportedFileTypeError('不支持此文件格式,请上传文字版 PDF 或 Word');
+  if (lower.endsWith('.docx')) return 'docx';
+  if (lower.endsWith('.doc')) {
+    // mammoth only reads the modern .docx (zip/OOXML) format -- a real legacy
+    // .doc (binary OLE2) buffer makes it throw "Can't find end of central
+    // directory", which isn't a clean, user-facing error. Reject it here
+    // with an actionable message instead of letting it crash later.
+    throw new UnsupportedFileTypeError('不支持旧版 .doc 格式,请在 Word 里用"另存为"转换成 .docx 后重新上传');
+  }
+  throw new UnsupportedFileTypeError('不支持此文件格式,请上传文字版 PDF 或 Word(.docx)');
 }
 
 export async function extractText(filename: string, buffer: Buffer): Promise<string> {
