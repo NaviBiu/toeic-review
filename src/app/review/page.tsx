@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
+import Header from '@/components/Header';
 
 type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
 
@@ -87,6 +88,7 @@ export default function ReviewPage() {
 
   return (
     <main className="min-h-screen bg-stone-50">
+      <Header />
       <div className="mx-auto max-w-xl px-6 py-12">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>

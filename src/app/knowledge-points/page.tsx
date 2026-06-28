@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
+import Header from '@/components/Header';
 
 type KP = {
   id: number; term: string; meaning: string; example: string; part: number;
@@ -71,43 +72,56 @@ export default function KnowledgePointsPage() {
   }
 
   return (
-    <main className="p-6">
-      <h1 className="text-xl font-semibold mb-4">错题库</h1>
+    <main className="min-h-screen bg-stone-50">
+      <Header />
+      <div className="mx-auto max-w-2xl px-6 py-10">
+        <h1 className="mb-6 text-xl font-bold text-stone-900">错题库</h1>
 
-      <form onSubmit={handleAdd} className="border rounded p-3 mb-4 flex flex-col gap-2 max-w-md">
-        <p className="text-sm text-gray-600">手动添加一条知识点(释义/例句留空也可以保存,场景默认未分类)</p>
-        <input value={newTerm} onChange={(e) => setNewTerm(e.target.value)} placeholder="词/短语" required className="border rounded px-2 py-1" />
-        <button type="button" onClick={handleAiAssist} disabled={!newTerm} className="text-blue-600 text-sm self-start">AI 自动补全</button>
-        <select value={newPart} onChange={(e) => setNewPart(e.target.value)} className="border rounded px-2 py-1">
-          {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
-        </select>
-        <input value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="释义(可留空)" className="border rounded px-2 py-1" />
-        <input value={newExample} onChange={(e) => setNewExample(e.target.value)} placeholder="例句(可留空)" className="border rounded px-2 py-1" />
-        <button type="submit" className="bg-blue-600 text-white rounded px-3 py-1 self-start">添加</button>
-      </form>
+        <form onSubmit={handleAdd} className="mb-6 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-stone-400">手动添加一条知识点(释义/例句留空也可以保存,场景默认未分类)</p>
+          <input
+            value={newTerm}
+            onChange={(e) => setNewTerm(e.target.value)}
+            placeholder="词/短语"
+            required
+            className="rounded-xl border border-stone-200 px-3 py-2 text-sm"
+          />
+          <button type="button" onClick={handleAiAssist} disabled={!newTerm} className="self-start text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:text-stone-300">
+            AI 自动补全
+          </button>
+          <select value={newPart} onChange={(e) => setNewPart(e.target.value)} className="rounded-xl border border-stone-200 px-3 py-2 text-sm">
+            {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
+          </select>
+          <input value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="释义(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
+          <input value={newExample} onChange={(e) => setNewExample(e.target.value)} placeholder="例句(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
+          <button type="submit" className="self-start rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
+            添加
+          </button>
+        </form>
 
-      <div className="flex gap-3 mb-4">
-        <select value={partFilter} onChange={(e) => setPartFilter(e.target.value)} className="border rounded px-2 py-1">
-          <option value="">全部 Part</option>
-          {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
-        </select>
-        <select value={majorFilter} onChange={(e) => setMajorFilter(e.target.value)} className="border rounded px-2 py-1">
-          <option value="">全部场景</option>
-          {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
+        <div className="mb-4 flex gap-3">
+          <select value={partFilter} onChange={(e) => setPartFilter(e.target.value)} className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm">
+            <option value="">全部 Part</option>
+            {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
+          </select>
+          <select value={majorFilter} onChange={(e) => setMajorFilter(e.target.value)} className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm">
+            <option value="">全部场景</option>
+            {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <ul className="flex flex-col gap-3">
+          {items.map((kp) => (
+            <li key={kp.id} className="flex items-start justify-between rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+              <div>
+                <div className="font-medium text-stone-900">{kp.term}</div>
+                <div className="text-sm text-stone-500">{kp.meaning}</div>
+                <div className="mt-1 text-xs text-stone-400">Part {kp.part} · {kp.scenarioMajor} / {kp.scenarioMinor}</div>
+              </div>
+              <button onClick={() => handleDelete(kp.id)} className="text-sm text-stone-400 hover:text-red-600">删除</button>
+            </li>
+          ))}
+        </ul>
       </div>
-      <ul className="flex flex-col gap-2">
-        {items.map((kp) => (
-          <li key={kp.id} className="border rounded p-3 flex justify-between items-start">
-            <div>
-              <div className="font-medium">{kp.term}</div>
-              <div className="text-sm text-gray-600">{kp.meaning}</div>
-              <div className="text-xs text-gray-400">Part {kp.part} · {kp.scenarioMajor} / {kp.scenarioMinor}</div>
-            </div>
-            <button onClick={() => handleDelete(kp.id)} className="text-red-600 text-sm">删除</button>
-          </li>
-        ))}
-      </ul>
     </main>
   );
 }

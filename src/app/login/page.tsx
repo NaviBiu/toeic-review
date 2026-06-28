@@ -24,18 +24,19 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3 w-72">
-        <h1 className="text-lg font-semibold">输入密码</h1>
+    <main className="flex min-h-screen items-center justify-center bg-stone-50">
+      <form onSubmit={handleSubmit} className="w-80 rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+        <h1 className="mb-1 text-lg font-bold text-stone-900">TOEIC 听力错题复盘</h1>
+        <p className="mb-5 text-sm text-stone-400">输入密码进入</p>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="border rounded px-3 py-2"
+          className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm"
           autoFocus
         />
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        <button type="submit" className="bg-blue-600 text-white rounded px-3 py-2">
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        <button type="submit" className="mt-4 w-full rounded-xl bg-indigo-600 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700">
           进入
         </button>
       </form>

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
+import Header from '@/components/Header';
 
 type PartScore = { correct: number; total: number };
 type ScenarioRow = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
@@ -58,57 +59,64 @@ export default function MockExamsPage() {
   }
 
   return (
-    <main className="p-6 max-w-xl">
-      <h1 className="text-xl font-semibold mb-4">记录一次模考</h1>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3 mb-6">
-        <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} required className="border rounded px-2 py-1" />
-        {(['part1', 'part2', 'part3', 'part4'] as const).map((key, i) => (
-          <div key={key} className="flex gap-2 items-center">
-            <span className="w-16">Part {i + 1}</span>
-            <input type="number" value={parts[key].correct} onChange={(e) => updatePart(key, 'correct', Number(e.target.value))} className="border rounded px-2 py-1 w-20" />
-            <span>/</span>
-            <input type="number" value={parts[key].total} onChange={(e) => updatePart(key, 'total', Number(e.target.value))} className="border rounded px-2 py-1 w-20" />
-          </div>
-        ))}
-
-        <div>
-          <p className="text-sm text-gray-600 mb-1">场景细分(选填)</p>
-          {scenarios.map((s, i) => (
-            <div key={i} className="flex gap-2 items-center mb-1">
-              <select value={s.scenarioMajor} onChange={(e) => updateScenarioRow(i, { scenarioMajor: e.target.value, scenarioMinor: '未分类' })} className="border rounded px-1">
-                {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <select value={s.scenarioMinor} onChange={(e) => updateScenarioRow(i, { scenarioMinor: e.target.value })} className="border rounded px-1">
-                {[...SCENARIOS[s.scenarioMajor], '未分类'].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <input type="number" value={s.correct} onChange={(e) => updateScenarioRow(i, { correct: Number(e.target.value) })} className="border rounded px-1 w-16" />
-              <span>/</span>
-              <input type="number" value={s.total} onChange={(e) => updateScenarioRow(i, { total: Number(e.target.value) })} className="border rounded px-1 w-16" />
-              <button type="button" onClick={() => removeScenarioRow(i)} className="text-red-600 text-sm">删除</button>
+    <main className="min-h-screen bg-stone-50">
+      <Header />
+      <div className="mx-auto max-w-xl px-6 py-10">
+        <h1 className="mb-6 text-xl font-bold text-stone-900">记录一次模考</h1>
+        <form onSubmit={handleSubmit} className="mb-8 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} required className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
+          {(['part1', 'part2', 'part3', 'part4'] as const).map((key, i) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="w-16 text-sm text-stone-500">Part {i + 1}</span>
+              <input type="number" value={parts[key].correct} onChange={(e) => updatePart(key, 'correct', Number(e.target.value))} className="w-20 rounded-xl border border-stone-200 px-2 py-1.5 text-sm" />
+              <span className="text-stone-400">/</span>
+              <input type="number" value={parts[key].total} onChange={(e) => updatePart(key, 'total', Number(e.target.value))} className="w-20 rounded-xl border border-stone-200 px-2 py-1.5 text-sm" />
             </div>
           ))}
-          <button type="button" onClick={addScenarioRow} className="text-blue-600 text-sm">+ 添加场景</button>
+
+          <div>
+            <p className="mb-2 text-sm text-stone-400">场景细分(选填)</p>
+            {scenarios.map((s, i) => (
+              <div key={i} className="mb-2 flex items-center gap-2">
+                <select value={s.scenarioMajor} onChange={(e) => updateScenarioRow(i, { scenarioMajor: e.target.value, scenarioMinor: '未分类' })} className="rounded-lg border border-stone-200 px-1 py-1 text-sm">
+                  {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select value={s.scenarioMinor} onChange={(e) => updateScenarioRow(i, { scenarioMinor: e.target.value })} className="rounded-lg border border-stone-200 px-1 py-1 text-sm">
+                  {[...SCENARIOS[s.scenarioMajor], '未分类'].map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input type="number" value={s.correct} onChange={(e) => updateScenarioRow(i, { correct: Number(e.target.value) })} className="w-16 rounded-lg border border-stone-200 px-1 py-1 text-sm" />
+                <span className="text-stone-400">/</span>
+                <input type="number" value={s.total} onChange={(e) => updateScenarioRow(i, { total: Number(e.target.value) })} className="w-16 rounded-lg border border-stone-200 px-1 py-1 text-sm" />
+                <button type="button" onClick={() => removeScenarioRow(i)} className="text-sm text-stone-400 hover:text-red-600">删除</button>
+              </div>
+            ))}
+            <button type="button" onClick={addScenarioRow} className="text-sm font-medium text-indigo-600 hover:text-indigo-700">+ 添加场景</button>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button type="submit" className="self-start rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700">保存</button>
+        </form>
+
+        <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史</h2>
+        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="bg-stone-50 text-stone-500">
+              <tr><th className="px-4 py-2 text-left">日期</th><th className="py-2">P1</th><th className="py-2">P2</th><th className="py-2">P3</th><th className="py-2">P4</th></tr>
+            </thead>
+            <tbody>
+              {history.map((r) => (
+                <tr key={r.id} className="border-t border-stone-100">
+                  <td className="px-4 py-2 text-stone-700">{r.testDate}</td>
+                  <td className="text-center text-stone-600">{r.part1.correct}/{r.part1.total}</td>
+                  <td className="text-center text-stone-600">{r.part2.correct}/{r.part2.total}</td>
+                  <td className="text-center text-stone-600">{r.part3.correct}/{r.part3.total}</td>
+                  <td className="text-center text-stone-600">{r.part4.correct}/{r.part4.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2">保存</button>
-      </form>
-
-      <h2 className="text-lg font-semibold mb-2">模考历史</h2>
-      <table className="w-full text-sm">
-        <thead><tr><th className="text-left">日期</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th></tr></thead>
-        <tbody>
-          {history.map((r) => (
-            <tr key={r.id}>
-              <td>{r.testDate}</td>
-              <td>{r.part1.correct}/{r.part1.total}</td>
-              <td>{r.part2.correct}/{r.part2.total}</td>
-              <td>{r.part3.correct}/{r.part3.total}</td>
-              <td>{r.part4.correct}/{r.part4.total}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      </div>
     </main>
   );
 }
