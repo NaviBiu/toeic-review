@@ -1,4 +1,4 @@
-import { PDFParse } from 'pdf-parse';
+import { extractText as extractPdfText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 
 export class UnsupportedFileTypeError extends Error {}
@@ -19,15 +19,15 @@ export function validateUpload(filename: string, byteLength: number): 'pdf' | 'd
 export async function extractText(filename: string, buffer: Buffer): Promise<string> {
   const kind = validateUpload(filename, buffer.byteLength);
   if (kind === 'pdf') {
-    // pdf-parse v2 dropped the v1 default-export function API in favor of a
-    // class with getText()/destroy(); the brief's snippet targeted v1.
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const result = await parser.getText();
-      return result.text;
-    } finally {
-      await parser.destroy();
-    }
+    // pdf-parse pulls in pdfjs-dist's full build, which loads @napi-rs/canvas's
+    // native binary at runtime -- Vercel's serverless function deploy doesn't
+    // reliably include that binary (confirmed by a real production crash:
+    // "ReferenceError: DOMMatrix is not defined"), and outputFileTracingIncludes
+    // didn't fix it either. unpdf ships a canvas-free serverless PDF.js build
+    // made for exactly this environment, so it has no native dependency to lose.
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractPdfText(pdf, { mergePages: true });
+    return text;
   }
   const result = await mammoth.extractRawText({ buffer });
   return result.value;
