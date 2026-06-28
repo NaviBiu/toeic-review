@@ -8,12 +8,13 @@ import { decideDedup } from '@/lib/importDedup';
 import { SCENARIOS } from '@/lib/scenarios';
 import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
 
-// A real multi-entry document (measured: ~30s for 20 entries) can exceed
-// the platform's default function duration well before the AI finishes
-// parsing -- found 2026-06-28 when a real upload silently produced no
-// response. Vercel clamps this to whatever the actual plan allows, so
-// requesting more than the account supports is harmless.
-export const maxDuration = 60;
+// A real multi-Part, multi-date document's total latency varies a lot run
+// to run (measured in production: 48s-63s+ for the same 8-batch document),
+// and 60s was cutting it close enough to cause an outright 504 on a real
+// attempt. Testing whether Vercel's real ceiling for this account is
+// actually higher than 60 -- requesting more than the account supports is
+// harmless, Vercel clamps it.
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
