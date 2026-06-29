@@ -220,7 +220,14 @@ async function parseChunk(
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<ParsedCandidate[]> {
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    // Switched from claude-sonnet-4-6 to Haiku 2026-06-30 -- structured
+    // extraction from semi-structured notes doesn't need Sonnet-level
+    // reasoning, and Sonnet's output pricing was burning through real
+    // API budget fast (mostly from repeated full-scale debugging runs
+    // against the real API, not normal daily usage, but Haiku cuts the
+    // ongoing per-import cost regardless). Revert this one line if
+    // parsing quality noticeably degrades in real use.
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 8192,
     system: buildSystemPrompt(scenarioTaxonomy, fallbackDate),
     messages: [{ role: 'user', content: chunkText }],
