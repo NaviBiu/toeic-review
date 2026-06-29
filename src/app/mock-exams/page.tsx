@@ -204,21 +204,23 @@ export default function MockExamsPage() {
             <table className="w-full text-sm">
               <thead className="bg-stone-50 text-xs font-medium text-stone-500">
                 <tr>
-                  <th className="px-4 py-2.5 text-left">日期</th>
-                  <th className="py-2.5">P1</th>
-                  <th className="py-2.5">P2</th>
-                  <th className="py-2.5">P3</th>
-                  <th className="py-2.5">P4</th>
+                  <th className="px-4 py-3.5 text-left">日期</th>
+                  <th className="py-3.5">P1</th>
+                  <th className="py-3.5">P2</th>
+                  <th className="py-3.5">P3</th>
+                  <th className="py-3.5">P4</th>
                 </tr>
               </thead>
               <tbody>
                 {pageHistory.map((r, idx) => (
                   <tr key={r.id} className={idx % 2 === 1 ? 'bg-stone-50/60' : ''}>
-                    <td className="px-4 py-2.5 text-stone-700">{r.testDate}</td>
+                    <td className="px-4 py-4 text-stone-700">{r.testDate}</td>
                     {(['part1', 'part2', 'part3', 'part4'] as const).map((p) => (
-                      <td key={p} className="text-center">
-                        <div className="text-stone-600">{r[p].correct}/{r[p].total}</div>
-                        <AccuracyBadge ratio={ratioOf(r[p].correct, r[p].total)} />
+                      <td key={p} className="py-4 text-center">
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span className="text-stone-600">{r[p].correct}/{r[p].total}</span>
+                          <AccuracyBadge ratio={ratioOf(r[p].correct, r[p].total)} />
+                        </div>
                       </td>
                     ))}
                   </tr>
