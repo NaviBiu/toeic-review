@@ -11,8 +11,15 @@ import {
   getTodayQueue,
 } from '../../src/lib/knowledgePoints';
 
+// Term is a synthetic "zztest-" marker, not a real English word -- this
+// suite runs against the real shared database (which now holds the user's
+// own growing real vocabulary), and a real word like "workshop" risks
+// silently colliding with a genuine row at some future point (confirmed
+// this almost happened: the user's real "workshop"/Part2 entry exists,
+// just classified under a different scenario than this fixture's, by
+// coincidence -- not by anything guaranteeing it always will be).
 const BASE = {
-  term: 'workshop',
+  term: 'zztest-workshop',
   meaning: '研讨会',
   example: "supervisors' workshop",
   notes: null,
@@ -35,10 +42,10 @@ describe('insertKnowledgePoint + findMatch', () => {
 
   it('finds a match using normalized term comparison, ignoring hyphens/spaces/case', async () => {
     await withTestClient(async (client) => {
-      await insertKnowledgePoint(client, { ...BASE, term: 'check-in' });
-      const match = await findMatch(client, 'Check In', BASE.part, BASE.scenarioMajor, BASE.scenarioMinor, BASE.skill);
+      await insertKnowledgePoint(client, { ...BASE, term: 'zztest-check-in' });
+      const match = await findMatch(client, 'Zztest Check In', BASE.part, BASE.scenarioMajor, BASE.scenarioMinor, BASE.skill);
       expect(match).not.toBeNull();
-      expect(match!.term).toBe('check-in');
+      expect(match!.term).toBe('zztest-check-in');
     });
   });
 
@@ -55,8 +62,8 @@ describe('insertKnowledgePoint + findMatch', () => {
 
   it('does not match across a different scenario_minor (same term, different sense)', async () => {
     await withTestClient(async (client) => {
-      await insertKnowledgePoint(client, { ...BASE, term: 'check', scenarioMajor: '金融/预算', scenarioMinor: '账单' });
-      const match = await findMatch(client, 'check', BASE.part, '办公室', '办公室流程', BASE.skill);
+      await insertKnowledgePoint(client, { ...BASE, term: 'zztest-check', scenarioMajor: '金融/预算', scenarioMinor: '账单' });
+      const match = await findMatch(client, 'zztest-check', BASE.part, '办公室', '办公室流程', BASE.skill);
       expect(match).toBeNull();
     });
   });
@@ -181,7 +188,7 @@ describe('listKnowledgePoints / getTodayQueue', () => {
   it('listKnowledgePoints filters by part and scenarioMajor', async () => {
     await withTestClient(async (client) => {
       await insertKnowledgePoint(client, BASE);
-      await insertKnowledgePoint(client, { ...BASE, term: 'invoice', part: 3, scenarioMajor: '采购', scenarioMinor: '发票' });
+      await insertKnowledgePoint(client, { ...BASE, term: 'zztest-invoice', part: 3, scenarioMajor: '采购', scenarioMinor: '发票' });
       const results = await listKnowledgePoints(client, { part: 3 });
       const terms = results.map((r) => r.term);
       // This runs against the real shared database (now holding the user's
@@ -189,8 +196,8 @@ describe('listKnowledgePoints / getTodayQueue', () => {
       // the part=3 filter includes this test's own row and excludes the
       // part=2 row from the same test, not that the result is *exactly*
       // these two rows (real part=3 data legitimately coexists here).
-      expect(terms).toContain('invoice');
-      expect(terms).not.toContain('workshop');
+      expect(terms).toContain('zztest-invoice');
+      expect(terms).not.toContain('zztest-workshop');
     });
   });
 

@@ -46,12 +46,22 @@ describe('createMockExam', () => {
 
 describe('listMockExams', () => {
   it('orders results by test_date descending', async () => {
+    // This runs against the real shared database (which now holds the
+    // user's own real mock exam records, possibly dated more recently than
+    // either fixture date below) -- assert this test's own two rows sort
+    // relative to each other correctly, not that they land at absolute
+    // positions [0] and [1] of the full unscoped list (flagged as a latent
+    // risk during Task 16's review, deprioritized then as "self-resolving"
+    // since the table was still empty; no longer true now that it isn't).
     await withTestClient(async (client) => {
       await createMockExam(client, { ...VALID, testDate: '2026-06-01', scenarios: [] });
       await createMockExam(client, { ...VALID, testDate: '2026-06-20', scenarios: [] });
       const all = await listMockExams(client);
-      expect(all[0].testDate).toBe('2026-06-20');
-      expect(all[1].testDate).toBe('2026-06-01');
+      const index0601 = all.findIndex((r) => r.testDate === '2026-06-01');
+      const index0620 = all.findIndex((r) => r.testDate === '2026-06-20');
+      expect(index0601).toBeGreaterThan(-1);
+      expect(index0620).toBeGreaterThan(-1);
+      expect(index0620).toBeLessThan(index0601); // 2026-06-20 sorts before 2026-06-01 (descending)
     });
   });
 });

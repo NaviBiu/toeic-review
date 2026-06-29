@@ -3,8 +3,11 @@ import { withTestClient } from './setup';
 import { applyConfirmedImportItem } from '../../src/lib/importConfirm';
 import { insertKnowledgePoint, applyReviewResult } from '../../src/lib/knowledgePoints';
 
+// "zztest-" prefix: a real English word here risks colliding with the
+// user's own real vocabulary in this shared database (already happened
+// once with a literal "workshop" fixture elsewhere in this suite).
 const BASE = {
-  term: 'workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
+  term: 'zztest-workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
   scenarioMajor: '一般商务', scenarioMinor: '会议', dateAdded: '2026-06-26', skill: 'listening',
 };
 

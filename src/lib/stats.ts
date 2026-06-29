@@ -10,7 +10,7 @@ export type KnowledgePointStats = {
   byScenarioMajor: ScenarioAccuracy[];
 };
 
-function accuracyOf(correct: number, wrong: number): number | null {
+export function accuracyOf(correct: number, wrong: number): number | null {
   const total = correct + wrong;
   return total === 0 ? null : correct / total;
 }

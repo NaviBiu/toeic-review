@@ -25,12 +25,27 @@ describe('getKnowledgePointStats', () => {
     });
   });
 
-  it('returns null accuracy when there is no review history yet (no division by zero)', async () => {
+  it('reflects a new review result as a before/after delta on the part aggregate', async () => {
+    // This runs against the real shared database (now holding the user's
+    // own real reviewed vocabulary), not an isolated empty one -- asserting
+    // an exact aggregate value (e.g. "accuracy is null because nothing else
+    // exists") breaks the moment real history exists for this part. Compare
+    // before vs. after instead, which holds regardless of pre-existing data.
+    // The pure division-by-zero guard itself is covered in
+    // tests/unit/stats.test.ts without touching the database at all.
     await withTestClient(async (client) => {
-      await insertKnowledgePoint(client, { ...BASE, term: 'b', part: 3 });
-      const stats = await getKnowledgePointStats(client);
-      const part3 = stats.byPart.find((p) => p.part === 3);
-      expect(part3?.accuracy).toBeNull();
+      const before = await getKnowledgePointStats(client);
+      const beforePart3 = before.byPart.find((p) => p.part === 3);
+      const beforeWrong = beforePart3?.wrongCount ?? 0;
+      const beforeCorrect = beforePart3?.correctCount ?? 0;
+
+      const b = await insertKnowledgePoint(client, { ...BASE, term: 'b', part: 3 });
+      await applyReviewResult(client, b.id, false, '2026-06-01');
+
+      const after = await getKnowledgePointStats(client);
+      const afterPart3 = after.byPart.find((p) => p.part === 3);
+      expect(afterPart3?.wrongCount).toBe(beforeWrong + 1);
+      expect(afterPart3?.correctCount).toBe(beforeCorrect);
     });
   });
 });

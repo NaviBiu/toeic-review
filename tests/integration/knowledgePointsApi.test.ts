@@ -23,7 +23,7 @@ describe('POST /api/knowledge-points (manual add)', () => {
   it('creates a record with required fields and defaults scenario to 未分类/未分类 when omitted', async () => {
     const req = makeRequest('http://localhost/api/knowledge-points', {
       method: 'POST',
-      body: JSON.stringify({ term: 'gantry', meaning: '', example: '', part: 1, dateAdded: '2026-06-26' }),
+      body: JSON.stringify({ term: 'zztest-gantry', meaning: '', example: '', part: 1, dateAdded: '2026-06-26' }),
     });
     const res = await createRoute(req);
     const body = await res.json();
@@ -49,7 +49,7 @@ describe('PATCH /api/knowledge-points/:id', () => {
   it('soft-deletes via {status: "deleted"} and restores via {status: "active"}', async () => {
     const createReq = makeRequest('http://localhost/api/knowledge-points', {
       method: 'POST',
-      body: JSON.stringify({ term: 'pier', meaning: 'm', example: 'e', part: 1, dateAdded: '2026-06-26' }),
+      body: JSON.stringify({ term: 'zztest-pier', meaning: 'm', example: 'e', part: 1, dateAdded: '2026-06-26' }),
     });
     const created = await (await createRoute(createReq)).json();
     createdIds.push(created.id);

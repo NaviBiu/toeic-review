@@ -3,7 +3,7 @@ import { sql } from '../../src/lib/db';
 
 vi.mock('@/lib/importParser', () => ({
   parseImportDocument: vi.fn(async () => [{
-    term: 'workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
+    term: 'zztest-workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
     dateAdded: '2026-06-23', scenarioMajor: '一般商务', scenarioMinor: '会议',
     scenarioWasSanitized: false, meaningWasAiGenerated: false, exampleWasAiGenerated: false,
   }]),
@@ -45,7 +45,7 @@ describe('POST /api/knowledge-points/import', () => {
 
   it('returns candidates annotated with an insert_new decision when nothing matches yet', async () => {
     const form = new FormData();
-    form.append('file', new File(['Part2 短问答\n时间:2026.06.23\n1. workshop 研讨会'], 'notes.docx'));
+    form.append('file', new File(['Part2 短问答\n时间:2026.06.23\n1. zztest-workshop 研讨会'], 'notes.docx'));
     const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
     const res = await importRoute(req);
     const body = await res.json();

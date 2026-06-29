@@ -5,6 +5,16 @@ import Header from '@/components/Header';
 
 type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
 
+// Keyed by local calendar date so it naturally resets the next day with no
+// cleanup logic needed. This is purely an informational counter -- it does
+// not drive any review/scheduling logic, just answers "did I actually lose
+// my progress?" when the page remounts (it didn't; only the per-session
+// queue position display did, which is expected -- see `index` below).
+function todayStorageKey() {
+  const d = new Date();
+  return `reviewedCount_${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
 export default function ReviewPage() {
   const [queue, setQueue] = useState<KP[]>([]);
   const [index, setIndex] = useState(0);
@@ -15,6 +25,11 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
+  const [completedToday, setCompletedToday] = useState(0);
+
+  useEffect(() => {
+    setCompletedToday(Number(localStorage.getItem(todayStorageKey()) ?? 0));
+  }, []);
 
   async function loadQueue() {
     setLoading(true);
@@ -40,6 +55,17 @@ export default function ReviewPage() {
   useEffect(() => { loadQueue(); }, [majorFilter]);
 
   const current = queue[index];
+
+  // Browser-native TTS (Web Speech API) -- zero API cost, runs entirely on
+  // the device, no network call to anything. `cancel()` first so rapidly
+  // clicking term then example doesn't overlap two readings.
+  function speak(text: string) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+  }
 
   function pickGuess(value: 'remember' | 'forgot') {
     setGuess(value);
@@ -81,6 +107,10 @@ export default function ReviewPage() {
       if (guess === 'forgot') {
         setQueue((q) => [...q, current]);
       }
+      const key = todayStorageKey();
+      const updatedCount = Number(localStorage.getItem(key) ?? 0) + 1;
+      localStorage.setItem(key, String(updatedCount));
+      setCompletedToday(updatedCount);
     }
     setIndex((i) => i + 1);
     setPhase('guessing');
@@ -138,11 +168,16 @@ export default function ReviewPage() {
       <div className="mx-auto max-w-xl px-6 py-12">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>
-          {queue.length > 0 && (
-            <span className="text-sm font-medium text-stone-400">
-              {Math.min(index + 1, queue.length)} / {queue.length}
-            </span>
-          )}
+          <div className="text-right">
+            {queue.length > 0 && (
+              <div className="text-sm font-medium text-stone-400">
+                本次还剩 {Math.min(index + 1, queue.length)} / {queue.length}
+              </div>
+            )}
+            {completedToday > 0 && (
+              <div className="text-xs text-stone-400">今天已累计复盘 {completedToday} 题</div>
+            )}
+          </div>
         </div>
 
         <select
@@ -172,7 +207,16 @@ export default function ReviewPage() {
         ) : (
           <>
             <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
-              <p className="text-3xl font-bold text-stone-900">{current.term}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-3xl font-bold text-stone-900">{current.term}</p>
+                <button
+                  onClick={() => speak(current.term)}
+                  aria-label="朗读"
+                  className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
+                >
+                  🔊
+                </button>
+              </div>
               {phase === 'guessing' && (
                 <div className="mt-6 flex gap-3">
                   <button
@@ -193,7 +237,16 @@ export default function ReviewPage() {
                 <>
                   <div className="mt-5 border-t border-stone-100 pt-5">
                     <p className="text-stone-800">{current.meaning}</p>
-                    <p className="mt-2 text-sm text-stone-400 italic">{current.example}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <p className="text-sm text-stone-400 italic">{current.example}</p>
+                      <button
+                        onClick={() => speak(current.example)}
+                        aria-label="朗读例句"
+                        className="shrink-0 rounded-full p-1 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
+                      >
+                        🔊
+                      </button>
+                    </div>
                     {current.notes && <p className="mt-2 text-sm text-stone-400">{current.notes}</p>}
                   </div>
                   <div className="mt-6 flex items-center justify-between">
