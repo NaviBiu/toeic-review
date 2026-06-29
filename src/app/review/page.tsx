@@ -5,14 +5,13 @@ import Header from '@/components/Header';
 
 type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
 
-// Keyed by local calendar date so it naturally resets the next day with no
-// cleanup logic needed. This is purely an informational counter -- it does
-// not drive any review/scheduling logic, just answers "did I actually lose
-// my progress?" when the page remounts (it didn't; only the per-session
-// queue position display did, which is expected -- see `index` below).
-function todayStorageKey() {
+// Scoped by local calendar date AND the active scenario filter, so switching
+// 场景筛选 mid-day tracks its own total instead of corrupting the "全部场景"
+// count (and vice versa) -- a deliberate simplification, not a full
+// per-filter history; see the conversation this shipped from for context.
+function dateKey(prefix: string, filter: string) {
   const d = new Date();
-  return `reviewedCount_${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  return `${prefix}_${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}_${filter || 'all'}`;
 }
 
 export default function ReviewPage() {
@@ -20,16 +19,20 @@ export default function ReviewPage() {
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<'guessing' | 'revealed'>('guessing');
   const [guess, setGuess] = useState<'remember' | 'forgot' | null>(null);
-  const [undo, setUndo] = useState<{ id: number; term: string } | null>(null);
+  const [undo, setUndo] = useState<{ id: number; term: string; index: number } | null>(null);
   const [majorFilter, setMajorFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [completedToday, setCompletedToday] = useState(0);
 
-  useEffect(() => {
-    setCompletedToday(Number(localStorage.getItem(todayStorageKey()) ?? 0));
-  }, []);
+  // x = totalToday - correctToday - deletedToday (still-outstanding items --
+  // not yet reviewed, or reviewed wrong and still pending -- excludes items
+  // that are done for good: answered correctly, or deleted). totalToday is
+  // fixed the first time it's recorded each day and never recomputed after,
+  // even as the live queue shrinks.
+  const [totalToday, setTotalToday] = useState<number | null>(null);
+  const [correctToday, setCorrectToday] = useState(0);
+  const [deletedToday, setDeletedToday] = useState(0);
 
   async function loadQueue() {
     setLoading(true);
@@ -39,10 +42,22 @@ export default function ReviewPage() {
       if (majorFilter) params.set('scenarioMajor', majorFilter);
       const res = await fetch(`/api/review/queue?${params}`);
       if (!res.ok) throw new Error('队列加载失败,请刷新重试');
-      setQueue(await res.json());
+      const data: KP[] = await res.json();
+      setQueue(data);
       setIndex(0);
       setPhase('guessing');
       setGuess(null);
+
+      const totalK = dateKey('reviewTotal', majorFilter);
+      const existingTotal = localStorage.getItem(totalK);
+      if (existingTotal === null) {
+        localStorage.setItem(totalK, String(data.length));
+        setTotalToday(data.length);
+      } else {
+        setTotalToday(Number(existingTotal));
+      }
+      setCorrectToday(Number(localStorage.getItem(dateKey('reviewCorrect', majorFilter)) ?? 0));
+      setDeletedToday(Number(localStorage.getItem(dateKey('reviewDeleted', majorFilter)) ?? 0));
     } catch (err: any) {
       // Without this, a failed fetch left `queue` as [] -- indistinguishable
       // from a genuinely empty "今天没有需要复盘的内容" state.
@@ -57,15 +72,63 @@ export default function ReviewPage() {
   const current = queue[index];
 
   // Browser-native TTS (Web Speech API) -- zero API cost, runs entirely on
-  // the device, no network call to anything. `cancel()` first so rapidly
-  // clicking term then example doesn't overlap two readings.
+  // the device, no network call to anything.
   function speak(text: string) {
-    if (!('speechSynthesis' in window)) return;
+    if (!('speechSynthesis' in window) || !text) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
     window.speechSynthesis.speak(utterance);
   }
+
+  // Plays each text in order, term then example, stopping after one full
+  // pass (no looping). Used for the automatic phase-transition playback;
+  // manual 🔊 clicks use the single-text `speak` above instead.
+  function speakSequence(texts: string[]) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    let i = 0;
+    function playNext() {
+      if (i >= texts.length) return;
+      const text = texts[i++];
+      if (!text) { playNext(); return; }
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      utterance.onend = playNext;
+      window.speechSynthesis.speak(utterance);
+    }
+    playNext();
+  }
+
+  // Auto-plays term then example once whenever a card is freshly shown --
+  // once "blind" (考察页, masked, phase=guessing -- this is the actual
+  // listening test: can you recognize it by ear with nothing to read) and
+  // once again on reveal (答案页, phase=revealed, full text + audio
+  // together as reinforcement). Re-fires whenever the current item or
+  // phase changes, not on every render.
+  useEffect(() => {
+    if (!current) return;
+    speakSequence([current.term, current.example]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, phase]);
+
+  // Stop any in-progress speech when leaving the page entirely.
+  useEffect(() => {
+    return () => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  }, []);
+
+  // → triggers the same action as clicking 下一个, but only once an answer
+  // has actually been revealed (otherwise there is nothing to advance from).
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' && phase === 'revealed') {
+        next();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, current, guess]);
 
   function pickGuess(value: 'remember' | 'forgot') {
     setGuess(value);
@@ -106,11 +169,12 @@ export default function ReviewPage() {
       // so today's session can't be finished on it until it's answered right.
       if (guess === 'forgot') {
         setQueue((q) => [...q, current]);
+      } else {
+        const key = dateKey('reviewCorrect', majorFilter);
+        const updated = correctToday + 1;
+        localStorage.setItem(key, String(updated));
+        setCorrectToday(updated);
       }
-      const key = todayStorageKey();
-      const updatedCount = Number(localStorage.getItem(key) ?? 0) + 1;
-      localStorage.setItem(key, String(updatedCount));
-      setCompletedToday(updatedCount);
     }
     setIndex((i) => i + 1);
     setPhase('guessing');
@@ -122,6 +186,7 @@ export default function ReviewPage() {
     setActionError('');
     const deletedId = current.id;
     const deletedTerm = current.term;
+    const deletedIndex = index;
     try {
       const res = await fetch(`/api/knowledge-points/${deletedId}`, {
         method: 'PATCH',
@@ -136,7 +201,12 @@ export default function ReviewPage() {
       setActionError('网络错误,删除失败,请重试');
       return;
     }
-    setUndo({ id: deletedId, term: deletedTerm });
+    const key = dateKey('reviewDeleted', majorFilter);
+    const updated = deletedToday + 1;
+    localStorage.setItem(key, String(updated));
+    setDeletedToday(updated);
+
+    setUndo({ id: deletedId, term: deletedTerm, index: deletedIndex });
     setTimeout(() => setUndo((u) => (u?.id === deletedId ? null : u)), 5000);
     setIndex((i) => i + 1);
     setPhase('guessing');
@@ -159,8 +229,20 @@ export default function ReviewPage() {
       setActionError('网络错误,撤销失败,请重试');
       return;
     }
+    const key = dateKey('reviewDeleted', majorFilter);
+    const updated = Math.max(0, deletedToday - 1);
+    localStorage.setItem(key, String(updated));
+    setDeletedToday(updated);
+
+    // Jump back to exactly where it was -- as if the delete never happened,
+    // not just "restored in the database but gone from this session".
+    setIndex(undo.index);
+    setPhase('guessing');
+    setGuess(null);
     setUndo(null);
   }
+
+  const outstanding = totalToday === null ? null : Math.max(0, totalToday - correctToday - deletedToday);
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -168,16 +250,9 @@ export default function ReviewPage() {
       <div className="mx-auto max-w-xl px-6 py-12">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>
-          <div className="text-right">
-            {queue.length > 0 && (
-              <div className="text-sm font-medium text-stone-400">
-                本次还剩 {Math.min(index + 1, queue.length)} / {queue.length}
-              </div>
-            )}
-            {completedToday > 0 && (
-              <div className="text-xs text-stone-400">今天已累计复盘 {completedToday} 题</div>
-            )}
-          </div>
+          {outstanding !== null && totalToday !== null && totalToday > 0 && (
+            <div className="text-sm font-medium text-stone-400">{outstanding} / {totalToday}</div>
+          )}
         </div>
 
         <select
@@ -207,16 +282,34 @@ export default function ReviewPage() {
         ) : (
           <>
             <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+              {/* 考察页(guessing): term + example shown but masked -- this is the
+                  actual listening test, recognize it by ear with nothing to read.
+                  答案页(revealed): both unmasked, plus meaning/notes. */}
               <div className="flex items-center gap-2">
-                <p className="text-3xl font-bold text-stone-900">{current.term}</p>
+                <p className={'text-3xl font-bold text-stone-900' + (phase === 'guessing' ? ' blur-md select-none' : '')}>
+                  {current.term}
+                </p>
                 <button
                   onClick={() => speak(current.term)}
-                  aria-label="朗读"
+                  title="朗读"
                   className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
                 >
                   🔊
                 </button>
               </div>
+              <div className="mt-3 flex items-center gap-2">
+                <p className={'text-sm text-stone-400 italic' + (phase === 'guessing' ? ' blur-md select-none' : '')}>
+                  {current.example}
+                </p>
+                <button
+                  onClick={() => speak(current.example)}
+                  title="朗读例句"
+                  className="shrink-0 rounded-full p-1 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
+                >
+                  🔊
+                </button>
+              </div>
+
               {phase === 'guessing' && (
                 <div className="mt-6 flex gap-3">
                   <button
@@ -237,16 +330,6 @@ export default function ReviewPage() {
                 <>
                   <div className="mt-5 border-t border-stone-100 pt-5">
                     <p className="text-stone-800">{current.meaning}</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      <p className="text-sm text-stone-400 italic">{current.example}</p>
-                      <button
-                        onClick={() => speak(current.example)}
-                        aria-label="朗读例句"
-                        className="shrink-0 rounded-full p-1 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
-                      >
-                        🔊
-                      </button>
-                    </div>
                     {current.notes && <p className="mt-2 text-sm text-stone-400">{current.notes}</p>}
                   </div>
                   <div className="mt-6 flex items-center justify-between">
@@ -259,22 +342,31 @@ export default function ReviewPage() {
                       >
                         你的判断:{guess === 'remember' ? '记得' : '不记得'}
                       </span>
-                      <button onClick={revoke} className="text-sm text-stone-400 underline hover:text-stone-600">
-                        撤回(改选)
+                      <button
+                        onClick={revoke}
+                        title="撤回(改选)"
+                        className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
+                      >
+                        ↺
                       </button>
                     </div>
                     <button
                       onClick={next}
-                      className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                      title="下一个 (键盘 →)"
+                      className="rounded-xl bg-indigo-600 px-5 py-2.5 text-lg font-medium text-white shadow-sm transition hover:bg-indigo-700"
                     >
-                      下一个
+                      →
                     </button>
                   </div>
                 </>
               )}
             </div>
-            <button onClick={handleDelete} className="mt-4 text-sm text-stone-400 hover:text-red-600">
-              删除(不需要再复习)
+            <button
+              onClick={handleDelete}
+              title="删除(不需要再复习)"
+              className="mt-4 rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-red-600"
+            >
+              🗑️
             </button>
           </>
         )}

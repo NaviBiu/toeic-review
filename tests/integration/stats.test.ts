@@ -15,13 +15,24 @@ describe('getKnowledgePointStats', () => {
   });
 
   it('computes accuracy per part from correct_count/wrong_count', async () => {
+    // Same fragility as the test below: this runs against the real shared
+    // database, so asserting the *aggregate* accuracy is exactly 0.5 only
+    // held when nothing else with part=2 existed yet. Compare the delta
+    // this test's own one-correct-one-wrong contribution produces instead.
     await withTestClient(async (client) => {
+      const before = await getKnowledgePointStats(client);
+      const beforePart2 = before.byPart.find((p) => p.part === 2);
+      const beforeCorrect = beforePart2?.correctCount ?? 0;
+      const beforeWrong = beforePart2?.wrongCount ?? 0;
+
       const a = await insertKnowledgePoint(client, { ...BASE, term: 'a', part: 2 });
       await applyReviewResult(client, a.id, true, '2026-06-01');
       await applyReviewResult(client, a.id, false, '2026-06-01');
-      const stats = await getKnowledgePointStats(client);
-      const part2 = stats.byPart.find((p) => p.part === 2);
-      expect(part2?.accuracy).toBeCloseTo(0.5);
+
+      const after = await getKnowledgePointStats(client);
+      const afterPart2 = after.byPart.find((p) => p.part === 2);
+      expect(afterPart2?.correctCount).toBe(beforeCorrect + 1);
+      expect(afterPart2?.wrongCount).toBe(beforeWrong + 1);
     });
   });
 
