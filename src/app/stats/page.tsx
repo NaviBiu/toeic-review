@@ -2,6 +2,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
+import AccuracyBadge from '@/components/AccuracyBadge';
+
+function ratioOf(correct: number, total: number) {
+  return total > 0 ? correct / total : null;
+}
 
 export default function StatsPage() {
   const [stats, setStats] = useState<any>(null);
@@ -44,51 +49,60 @@ export default function StatsPage() {
         <h1 className="mb-6 text-xl font-bold text-stone-900">统计</h1>
 
         <section className="mb-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-lg font-semibold text-stone-900">错题库统计</h2>
-          <p className="mb-3 text-sm text-stone-500">
-            活跃 <span className="font-semibold text-stone-900">{stats.activeCount}</span> · 已掌握{' '}
-            <span className="font-semibold text-emerald-600">{stats.masteredCount}</span>
-          </p>
-          <table className="w-full text-sm">
-            <thead className="text-stone-400"><tr><th className="text-left">Part</th><th className="text-right">正确率</th></tr></thead>
-            <tbody>
-              {stats.byPart.map((p: any) => (
-                <tr key={p.part} className="border-t border-stone-100">
-                  <td className="py-1.5 text-stone-700">Part {p.part}</td>
-                  <td className="py-1.5 text-right text-stone-700">{p.accuracy === null ? '—' : `${Math.round(p.accuracy * 100)}%`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <table className="mt-3 w-full text-sm">
-            <thead className="text-stone-400"><tr><th className="text-left">场景</th><th className="text-right">正确率</th></tr></thead>
-            <tbody>
-              {stats.byScenarioMajor.map((s: any) => (
-                <tr key={s.scenarioMajor} className="border-t border-stone-100">
-                  <td className="py-1.5 text-stone-700">{s.scenarioMajor}</td>
-                  <td className="py-1.5 text-right text-stone-700">{s.accuracy === null ? '—' : `${Math.round(s.accuracy * 100)}%`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h2 className="mb-4 text-lg font-semibold text-stone-900">错题库统计</h2>
+
+          <div className="mb-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-stone-50 p-4 text-center">
+              <div className="text-2xl font-bold text-stone-900">{stats.activeCount}</div>
+              <div className="mt-1 text-xs text-stone-400">活跃</div>
+            </div>
+            <div className="rounded-xl bg-emerald-50 p-4 text-center">
+              <div className="text-2xl font-bold text-emerald-600">{stats.masteredCount}</div>
+              <div className="mt-1 text-xs text-stone-400">已掌握</div>
+            </div>
+          </div>
+
+          <p className="mb-2 text-xs font-medium text-stone-400">按 Part</p>
+          <div className="mb-5 flex flex-col gap-1.5">
+            {stats.byPart.map((p: any) => (
+              <div key={p.part} className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2">
+                <span className="text-sm text-stone-700">Part {p.part}</span>
+                <AccuracyBadge ratio={p.accuracy} />
+              </div>
+            ))}
+          </div>
+
+          <p className="mb-2 text-xs font-medium text-stone-400">按场景</p>
+          <div className="flex flex-col gap-1.5">
+            {stats.byScenarioMajor.map((s: any) => (
+              <div key={s.scenarioMajor} className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2">
+                <span className="text-sm text-stone-700">{s.scenarioMajor}</span>
+                <AccuracyBadge ratio={s.accuracy} />
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="mb-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
           <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史(最近 5 次)</h2>
-          <table className="w-full text-sm">
-            <thead className="text-stone-400"><tr><th className="text-left">日期</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th></tr></thead>
-            <tbody>
+          {exams.length === 0 ? (
+            <p className="text-sm text-stone-400">还没有模考记录</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
               {exams.slice(0, 5).map((r) => (
-                <tr key={r.id} className="border-t border-stone-100">
-                  <td className="py-1.5 text-stone-700">{r.testDate}</td>
-                  <td className="text-center text-stone-600">{r.part1.correct}/{r.part1.total}</td>
-                  <td className="text-center text-stone-600">{r.part2.correct}/{r.part2.total}</td>
-                  <td className="text-center text-stone-600">{r.part3.correct}/{r.part3.total}</td>
-                  <td className="text-center text-stone-600">{r.part4.correct}/{r.part4.total}</td>
-                </tr>
+                <div key={r.id} className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2">
+                  <span className="text-sm text-stone-700">{r.testDate}</span>
+                  <div className="flex gap-3">
+                    {(['part1', 'part2', 'part3', 'part4'] as const).map((p, i) => (
+                      <div key={p} className="flex items-center gap-1 text-xs text-stone-500">
+                        P{i + 1} <AccuracyBadge ratio={ratioOf(r[p].correct, r[p].total)} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          )}
           <Link href="/mock-exams" className="mt-3 inline-block text-sm font-medium text-indigo-600 hover:text-indigo-700">
             查看全部 →
           </Link>
