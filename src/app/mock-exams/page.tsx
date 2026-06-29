@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
 import Header from '@/components/Header';
+import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 
 type PartScore = { correct: number; total: number };
 type ScenarioRow = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
@@ -22,6 +23,10 @@ export default function MockExamsPage() {
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageHistory = history.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   async function load() {
     try {
@@ -69,6 +74,7 @@ export default function MockExamsPage() {
       setTestDate('');
       setParts(PART_DEFAULTS);
       setScenarios([]);
+      setPage(1);
       load();
     } catch {
       setError('网络错误,请重试');
@@ -131,7 +137,7 @@ export default function MockExamsPage() {
               <tr><th className="px-4 py-2 text-left">日期</th><th className="py-2">P1</th><th className="py-2">P2</th><th className="py-2">P3</th><th className="py-2">P4</th></tr>
             </thead>
             <tbody>
-              {history.map((r) => (
+              {pageHistory.map((r) => (
                 <tr key={r.id} className="border-t border-stone-100">
                   <td className="px-4 py-2 text-stone-700">{r.testDate}</td>
                   <td className="text-center text-stone-600">{r.part1.correct}/{r.part1.total}</td>
@@ -143,6 +149,7 @@ export default function MockExamsPage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
       </div>
     </main>
   );

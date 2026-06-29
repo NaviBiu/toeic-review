@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import Header from '@/components/Header';
 
 export default function StatsPage() {
@@ -73,11 +74,11 @@ export default function StatsPage() {
         </section>
 
         <section className="mb-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史</h2>
+          <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史(最近 5 次)</h2>
           <table className="w-full text-sm">
             <thead className="text-stone-400"><tr><th className="text-left">日期</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th></tr></thead>
             <tbody>
-              {exams.map((r) => (
+              {exams.slice(0, 5).map((r) => (
                 <tr key={r.id} className="border-t border-stone-100">
                   <td className="py-1.5 text-stone-700">{r.testDate}</td>
                   <td className="text-center text-stone-600">{r.part1.correct}/{r.part1.total}</td>
@@ -88,6 +89,9 @@ export default function StatsPage() {
               ))}
             </tbody>
           </table>
+          <Link href="/mock-exams" className="mt-3 inline-block text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            查看全部 →
+          </Link>
         </section>
 
         <a href="/api/export" className="inline-block rounded-xl bg-stone-700 px-4 py-2.5 font-medium text-white shadow-sm hover:bg-stone-800">

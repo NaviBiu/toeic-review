@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Header from '@/components/Header';
+import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 
 type KP = { id: number; term: string; meaning: string; part: number; scenarioMajor: string; scenarioMinor: string };
 
@@ -8,6 +9,10 @@ export default function MasteredPage() {
   const [items, setItems] = useState<KP[]>([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   async function load() {
     const res = await fetch('/api/knowledge-points?status=mastered');
@@ -55,7 +60,7 @@ export default function MasteredPage() {
           </div>
         ) : (
           <ul className="flex flex-col gap-3">
-            {items.map((kp) => (
+            {pageItems.map((kp) => (
               <li key={kp.id} className="flex items-center justify-between rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
                 <div>
                   <div className="font-medium text-stone-900">✅ {kp.term}</div>
@@ -67,6 +72,7 @@ export default function MasteredPage() {
             ))}
           </ul>
         )}
+        <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
       </div>
     </main>
   );

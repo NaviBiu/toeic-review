@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import Header from '@/components/Header';
 import { SCENARIOS } from '@/lib/scenarios';
+import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 
 type Candidate = {
   term: string; meaning: string; example: string; notes: string | null; part: number;
@@ -29,6 +30,11 @@ export default function ImportPage() {
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(candidates.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageCandidates = candidates.slice(pageStart, pageStart + PAGE_SIZE);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -55,6 +61,7 @@ export default function ImportPage() {
         return;
       }
       setCandidates(body.candidates.map((c: any) => ({ ...c, confirmed: c.decision.action !== 'skip_duplicate', keepVersion: 'new' })));
+      setPage(1);
     } catch (err: any) {
       // Covers network drops / timeouts -- previously unhandled, so a failed
       // fetch produced no feedback at all.
@@ -122,8 +129,13 @@ export default function ImportPage() {
 
         {candidates.length > 0 && (
           <>
+            <p className="mb-3 text-sm text-stone-400">
+              共 {candidates.length} 条 · "确认导入"会处理全部已勾选的条目,不限于当前页面
+            </p>
             <ul className="mb-4 flex flex-col gap-3">
-              {candidates.map((c, i) => (
+              {pageCandidates.map((c, localIdx) => {
+                const i = pageStart + localIdx;
+                return (
                 <li key={i} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
                   <div className="mb-2 flex items-center gap-2">
                     <input
@@ -210,12 +222,14 @@ export default function ImportPage() {
                     </div>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
+            <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
             <button
               onClick={handleConfirm}
               disabled={confirming}
-              className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+              className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
             >
               {confirming ? '正在导入…' : '确认导入'}
             </button>

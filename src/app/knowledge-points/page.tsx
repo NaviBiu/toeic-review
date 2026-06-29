@@ -2,10 +2,21 @@
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
 import Header from '@/components/Header';
+import Modal from '@/components/Modal';
+import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 
 type KP = {
   id: number; term: string; meaning: string; example: string; notes: string | null; part: number;
-  scenarioMajor: string; scenarioMinor: string; dateAdded: string; status: string;
+  scenarioMajor: string; scenarioMinor: string; dateAdded: string; status: string; wrongCount: number;
+};
+
+type SortKey = 'dateAdded_desc' | 'dateAdded_asc' | 'wrongCount_desc' | 'wrongCount_asc';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  dateAdded_desc: '添加时间(新→旧)',
+  dateAdded_asc: '添加时间(旧→新)',
+  wrongCount_desc: '错误次数(多→少)',
+  wrongCount_asc: '错误次数(少→多)',
 };
 
 type EditDraft = {
@@ -19,6 +30,10 @@ export default function KnowledgePointsPage() {
   const [items, setItems] = useState<KP[]>([]);
   const [partFilter, setPartFilter] = useState('');
   const [majorFilter, setMajorFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('dateAdded_desc');
+  const [page, setPage] = useState(1);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [newTerm, setNewTerm] = useState('');
   const [newPart, setNewPart] = useState('1');
   const [newMeaning, setNewMeaning] = useState('');
@@ -47,6 +62,25 @@ export default function KnowledgePointsPage() {
   }
 
   useEffect(() => { load(); }, [partFilter, majorFilter]);
+
+  // Search/sort run client-side over the already-fetched (part/scenario
+  // filtered) list -- this is a personal single-user vocab list, never large
+  // enough to need a server-side query for a plain substring match or a
+  // four-way sort.
+  useEffect(() => { setPage(1); }, [partFilter, majorFilter, search, sortKey]);
+
+  const visible = items
+    .filter((kp) => !search.trim() || kp.term.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => {
+      if (sortKey.startsWith('wrongCount')) {
+        return sortKey.endsWith('desc') ? b.wrongCount - a.wrongCount : a.wrongCount - b.wrongCount;
+      }
+      const cmp = a.dateAdded.localeCompare(b.dateAdded);
+      return sortKey.endsWith('desc') ? -cmp : cmp;
+    });
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   async function handleDelete(id: number, term: string) {
     await fetch(`/api/knowledge-points/${id}`, {
@@ -174,43 +208,59 @@ export default function KnowledgePointsPage() {
     <main className="min-h-screen bg-stone-50">
       <Header />
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <h1 className="mb-6 text-xl font-bold text-stone-900">错题库</h1>
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-xl font-bold text-stone-900">错题库</h1>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+          >
+            + 手动添加
+          </button>
+        </div>
 
-        <form onSubmit={handleAdd} className="mb-6 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-stone-400">手动添加一条知识点(释义/例句留空也可以保存,场景默认未分类)</p>
+        <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="手动添加知识点">
+          <form onSubmit={handleAdd} className="flex flex-col gap-3">
+            <p className="text-sm text-stone-400">释义/例句留空也可以保存,场景默认未分类</p>
+            <input
+              value={newTerm}
+              onChange={(e) => setNewTerm(e.target.value)}
+              placeholder="词/短语"
+              required
+              className="rounded-xl border border-stone-200 px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={handleAiAssist}
+              disabled={!newTerm || assisting}
+              className="self-start text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:text-stone-300"
+            >
+              {assisting ? '正在补全…' : 'AI 自动补全'}
+            </button>
+            {assistError && <p className="text-sm text-red-600">{assistError}</p>}
+            <select value={newPart} onChange={(e) => setNewPart(e.target.value)} className="rounded-xl border border-stone-200 px-3 py-2 text-sm">
+              {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
+            </select>
+            <input value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="释义(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
+            <input value={newExample} onChange={(e) => setNewExample(e.target.value)} placeholder="例句(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
+            <button
+              type="submit"
+              disabled={adding}
+              className="self-start rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {adding ? '添加中…' : '添加'}
+            </button>
+            {addError && <p className="text-sm text-red-600">{addError}</p>}
+            {addSuccess && <p className="text-sm text-emerald-600">{addSuccess}</p>}
+          </form>
+        </Modal>
+
+        <div className="mb-4 flex flex-wrap gap-3">
           <input
-            value={newTerm}
-            onChange={(e) => setNewTerm(e.target.value)}
-            placeholder="词/短语"
-            required
-            className="rounded-xl border border-stone-200 px-3 py-2 text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索词/短语"
+            className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm"
           />
-          <button
-            type="button"
-            onClick={handleAiAssist}
-            disabled={!newTerm || assisting}
-            className="self-start text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:text-stone-300"
-          >
-            {assisting ? '正在补全…' : 'AI 自动补全'}
-          </button>
-          {assistError && <p className="text-sm text-red-600">{assistError}</p>}
-          <select value={newPart} onChange={(e) => setNewPart(e.target.value)} className="rounded-xl border border-stone-200 px-3 py-2 text-sm">
-            {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
-          </select>
-          <input value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="释义(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
-          <input value={newExample} onChange={(e) => setNewExample(e.target.value)} placeholder="例句(可留空)" className="rounded-xl border border-stone-200 px-3 py-2 text-sm" />
-          <button
-            type="submit"
-            disabled={adding}
-            className="self-start rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
-          >
-            {adding ? '添加中…' : '添加'}
-          </button>
-          {addError && <p className="text-sm text-red-600">{addError}</p>}
-          {addSuccess && <p className="text-sm text-emerald-600">{addSuccess}</p>}
-        </form>
-
-        <div className="mb-4 flex gap-3">
           <select value={partFilter} onChange={(e) => setPartFilter(e.target.value)} className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm">
             <option value="">全部 Part</option>
             {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Part {p}</option>)}
@@ -219,9 +269,12 @@ export default function KnowledgePointsPage() {
             <option value="">全部场景</option>
             {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm">
+            {Object.entries(SORT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
         </div>
         <ul className="flex flex-col gap-3">
-          {items.map((kp) => (
+          {pageItems.map((kp) => (
             <li key={kp.id} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
               {editingId === kp.id && editDraft ? (
                 <div>
@@ -306,6 +359,7 @@ export default function KnowledgePointsPage() {
             </li>
           ))}
         </ul>
+        <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
       </div>
 
       {undo && (
