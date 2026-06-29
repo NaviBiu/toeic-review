@@ -19,10 +19,18 @@ export default function MockExamsPage() {
   const [parts, setParts] = useState<Record<string, PartScore>>(PART_DEFAULTS);
   const [scenarios, setScenarios] = useState<ScenarioRow[]>([]);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [historyError, setHistoryError] = useState('');
 
   async function load() {
-    const res = await fetch('/api/mock-exams');
-    setHistory(await res.json());
+    try {
+      const res = await fetch('/api/mock-exams');
+      if (!res.ok) throw new Error();
+      setHistory(await res.json());
+    } catch {
+      setHistoryError('模考历史加载失败,请刷新重试');
+    }
   }
   useEffect(() => { load(); }, []);
 
@@ -43,19 +51,30 @@ export default function MockExamsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    const res = await fetch('/api/mock-exams', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testDate, ...parts, scenarios }),
-    });
-    if (!res.ok) {
-      setError((await res.json()).error);
-      return;
+    setSuccess('');
+    setSaving(true);
+    try {
+      const res = await fetch('/api/mock-exams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testDate, ...parts, scenarios }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? '保存失败,请重试');
+        return;
+      }
+      setSuccess('已保存模考成绩');
+      setTimeout(() => setSuccess(''), 4000);
+      setTestDate('');
+      setParts(PART_DEFAULTS);
+      setScenarios([]);
+      load();
+    } catch {
+      setError('网络错误,请重试');
+    } finally {
+      setSaving(false);
     }
-    setTestDate('');
-    setParts(PART_DEFAULTS);
-    setScenarios([]);
-    load();
   }
 
   return (
@@ -94,10 +113,18 @@ export default function MockExamsPage() {
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <button type="submit" className="self-start rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700">保存</button>
+          {success && <p className="text-sm text-emerald-600">{success}</p>}
+          <button
+            type="submit"
+            disabled={saving}
+            className="self-start rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
         </form>
 
         <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史</h2>
+        {historyError && <p className="mb-3 text-sm text-red-600">{historyError}</p>}
         <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead className="bg-stone-50 text-stone-500">

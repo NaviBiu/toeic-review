@@ -12,15 +12,29 @@ export default function ReviewPage() {
   const [guess, setGuess] = useState<'remember' | 'forgot' | null>(null);
   const [undo, setUndo] = useState<{ id: number; term: string } | null>(null);
   const [majorFilter, setMajorFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
 
   async function loadQueue() {
-    const params = new URLSearchParams();
-    if (majorFilter) params.set('scenarioMajor', majorFilter);
-    const res = await fetch(`/api/review/queue?${params}`);
-    setQueue(await res.json());
-    setIndex(0);
-    setPhase('guessing');
-    setGuess(null);
+    setLoading(true);
+    setLoadError('');
+    try {
+      const params = new URLSearchParams();
+      if (majorFilter) params.set('scenarioMajor', majorFilter);
+      const res = await fetch(`/api/review/queue?${params}`);
+      if (!res.ok) throw new Error('队列加载失败,请刷新重试');
+      setQueue(await res.json());
+      setIndex(0);
+      setPhase('guessing');
+      setGuess(null);
+    } catch (err: any) {
+      // Without this, a failed fetch left `queue` as [] -- indistinguishable
+      // from a genuinely empty "今天没有需要复盘的内容" state.
+      setLoadError(err.message ?? '网络错误,请刷新重试');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { loadQueue(); }, [majorFilter]);
@@ -41,12 +55,25 @@ export default function ReviewPage() {
   }
 
   async function next() {
+    setActionError('');
     if (current && guess) {
-      await fetch(`/api/review/${current.id}/answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ correct: guess === 'remember' }),
-      });
+      try {
+        const res = await fetch(`/api/review/${current.id}/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ correct: guess === 'remember' }),
+        });
+        if (!res.ok) {
+          // Do NOT advance -- guess/phase stay exactly as they are so the
+          // user can just click 下一个 again. Previously this result was
+          // silently dropped and the UI moved on as if it had been saved.
+          setActionError('保存失败,这条结果还没记上,请重试');
+          return;
+        }
+      } catch {
+        setActionError('网络错误,这条结果还没记上,请重试');
+        return;
+      }
       // A wrong answer stays due today on the backend (src/lib/srs.ts) instead
       // of moving to tomorrow -- re-appending it here makes it actually
       // resurface within this same sitting instead of only on next page load,
@@ -62,13 +89,23 @@ export default function ReviewPage() {
 
   async function handleDelete() {
     if (!current) return;
+    setActionError('');
     const deletedId = current.id;
     const deletedTerm = current.term;
-    await fetch(`/api/knowledge-points/${deletedId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'deleted' }),
-    });
+    try {
+      const res = await fetch(`/api/knowledge-points/${deletedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'deleted' }),
+      });
+      if (!res.ok) {
+        setActionError('删除失败,请重试');
+        return;
+      }
+    } catch {
+      setActionError('网络错误,删除失败,请重试');
+      return;
+    }
     setUndo({ id: deletedId, term: deletedTerm });
     setTimeout(() => setUndo((u) => (u?.id === deletedId ? null : u)), 5000);
     setIndex((i) => i + 1);
@@ -78,11 +115,20 @@ export default function ReviewPage() {
 
   async function handleUndo() {
     if (!undo) return;
-    await fetch(`/api/knowledge-points/${undo.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'active' }),
-    });
+    try {
+      const res = await fetch(`/api/knowledge-points/${undo.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active' }),
+      });
+      if (!res.ok) {
+        setActionError('撤销失败,请重试');
+        return;
+      }
+    } catch {
+      setActionError('网络错误,撤销失败,请重试');
+      return;
+    }
     setUndo(null);
   }
 
@@ -108,7 +154,17 @@ export default function ReviewPage() {
           {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
 
-        {!current ? (
+        {actionError && <p className="mb-4 text-sm text-red-600">{actionError}</p>}
+
+        {loading ? (
+          <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
+            加载中…
+          </div>
+        ) : loadError ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-10 text-center text-red-600 shadow-sm">
+            {loadError}
+          </div>
+        ) : !current ? (
           <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center shadow-sm">
             <p className="text-2xl">🎉</p>
             <p className="mt-3 text-stone-500">今天没有需要复盘的内容</p>

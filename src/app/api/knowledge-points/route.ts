@@ -29,6 +29,11 @@ export async function POST(req: NextRequest) {
       dateAdded,
     });
     return NextResponse.json(kp, { status: 201 });
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return NextResponse.json({ error: '这个组合已经存在,请检查是否要合并' }, { status: 409 });
+    }
+    throw err;
   } finally {
     await client.end();
   }

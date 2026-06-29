@@ -7,17 +7,28 @@ type Candidate = {
   term: string; meaning: string; example: string; notes: string | null; part: number;
   dateAdded: string; scenarioMajor: string; scenarioMinor: string;
   scenarioWasSanitized: boolean; meaningWasAiGenerated: boolean; exampleWasAiGenerated: boolean;
+  dateWasClampedToToday: boolean;
   decision: { action: string; reviveFromMastered?: boolean; textConflict?: boolean };
   existingId: number | null;
   confirmed: boolean;
   keepVersion: 'new' | 'existing';
 };
 
+const ACTION_LABELS: Record<string, string> = {
+  inserted: '已新增',
+  wrong_again: '已记录为又错一次',
+  skipped: '与现有记录相同,已跳过',
+};
+
+const TODAY = new Date().toISOString().slice(0, 10);
+
 export default function ImportPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -58,14 +69,33 @@ export default function ImportPage() {
   }
 
   async function handleConfirm() {
-    const res = await fetch('/api/knowledge-points/import/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: candidates.filter((c) => c.confirmed) }),
-    });
-    const body = await res.json();
-    setResults(body.results);
-    setCandidates([]);
+    setConfirmError('');
+    setConfirming(true);
+    try {
+      const res = await fetch('/api/knowledge-points/import/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: candidates.filter((c) => c.confirmed) }),
+      });
+      let body: any;
+      try {
+        body = await res.json();
+      } catch {
+        throw new Error('服务器返回了无法识别的内容,请重试');
+      }
+      if (!res.ok) {
+        throw new Error(body.error ?? '导入失败,请重试');
+      }
+      setResults(body.results);
+      setCandidates([]);
+    } catch (err: any) {
+      // Keep `candidates` intact on failure -- otherwise every edit the user
+      // just made on the confirm list (fixing AI misclassifications, etc.)
+      // would be silently lost and they'd have to redo all of it.
+      setConfirmError(err.message ?? '网络错误,请重试');
+    } finally {
+      setConfirming(false);
+    }
   }
 
   return (
@@ -102,17 +132,16 @@ export default function ImportPage() {
                       onChange={(e) => updateCandidate(i, { confirmed: e.target.checked })}
                       className="h-4 w-4 accent-indigo-600"
                     />
-                    <input
-                      value={c.term}
-                      onChange={(e) => updateCandidate(i, { term: e.target.value })}
-                      className="flex-1 rounded-lg border border-stone-200 px-2 py-1 text-sm font-medium text-stone-900"
-                    />
+                    <span className="flex-1 text-sm font-medium text-stone-900">{c.term}</span>
                   </div>
                   {c.decision.action === 'skip_duplicate' && (
                     <p className="text-sm text-stone-400">与现有记录完全相同,已跳过</p>
                   )}
                   {c.scenarioWasSanitized && (
                     <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-700">AI 分类未命中,已自动归为未分类,请手动校正</p>
+                  )}
+                  {c.dateWasClampedToToday && (
+                    <p className="rounded-lg bg-red-50 p-2 text-sm text-red-700">解析出的日期晚于今天,已自动改为今天,如果不对请在下面手动修正</p>
                   )}
                   {(c.meaningWasAiGenerated || c.exampleWasAiGenerated) && (
                     <p className="text-sm text-indigo-600">释义/例句由 AI 补充,请检查</p>
@@ -140,6 +169,13 @@ export default function ImportPage() {
                   />
 
                   <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      type="date"
+                      value={c.dateAdded}
+                      max={TODAY}
+                      onChange={(e) => updateCandidate(i, { dateAdded: e.target.value })}
+                      className="rounded-lg border border-stone-200 px-2 py-1 text-sm"
+                    />
                     <select
                       value={c.part}
                       onChange={(e) => updateCandidate(i, { part: Number(e.target.value) })}
@@ -176,19 +212,41 @@ export default function ImportPage() {
                 </li>
               ))}
             </ul>
-            <button onClick={handleConfirm} className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700">
-              确认导入
+            <button
+              onClick={handleConfirm}
+              disabled={confirming}
+              className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {confirming ? '正在导入…' : '确认导入'}
             </button>
+            {confirmError && <p className="mt-2 text-sm text-red-600">{confirmError}(你的修改还在,可以再次点击确认)</p>}
           </>
         )}
 
-        {results.length > 0 && (
-          <ul className="mt-6 flex flex-col gap-1 text-sm text-stone-600">
-            {results.map((r, i) => (
-              <li key={i}>{r.term}: {r.action === 'error' ? `失败 — ${r.error}` : r.action}</li>
-            ))}
-          </ul>
-        )}
+        {results.length > 0 && (() => {
+          const counts = results.reduce<Record<string, number>>((acc, r) => {
+            acc[r.action] = (acc[r.action] ?? 0) + 1;
+            return acc;
+          }, {});
+          const parts = [
+            counts.inserted && `新增 ${counts.inserted} 条`,
+            counts.wrong_again && `标记答错 ${counts.wrong_again} 条`,
+            counts.skipped && `跳过重复 ${counts.skipped} 条`,
+            counts.error && `失败 ${counts.error} 条`,
+          ].filter(Boolean);
+          return (
+            <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+              <p className="font-medium text-stone-900">导入完成:{parts.join('、')}</p>
+              <ul className="mt-2 flex flex-col gap-1 text-sm">
+                {results.map((r, i) => (
+                  <li key={i} className={r.action === 'error' ? 'text-red-600' : 'text-stone-500'}>
+                    {r.term}:{r.action === 'error' ? `失败 — ${r.error}` : ACTION_LABELS[r.action] ?? r.action}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
       </div>
     </main>
   );

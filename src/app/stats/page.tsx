@@ -5,11 +5,27 @@ import Header from '@/components/Header';
 export default function StatsPage() {
   const [stats, setStats] = useState<any>(null);
   const [exams, setExams] = useState<any[]>([]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/stats').then((r) => r.json()).then(setStats);
-    fetch('/api/mock-exams').then((r) => r.json()).then(setExams);
+    fetch('/api/stats')
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(setStats)
+      .catch(() => setError('统计加载失败,请刷新重试'));
+    fetch('/api/mock-exams')
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(setExams)
+      .catch(() => setError('统计加载失败,请刷新重试'));
   }, []);
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-stone-50">
+        <Header />
+        <div className="mx-auto max-w-2xl px-6 py-10 text-red-600">{error}</div>
+      </main>
+    );
+  }
 
   if (!stats) {
     return (

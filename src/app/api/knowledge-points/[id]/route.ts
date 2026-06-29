@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/db';
 import { updateKnowledgePointFields, softDeleteKnowledgePoint, restoreKnowledgePoint } from '@/lib/knowledgePoints';
 import { isValidScenario } from '@/lib/scenarios';
-import { todayInShanghai } from '@/lib/dateUtils';
+import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: idParam } = await params;
@@ -19,6 +19,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     if (body.scenarioMajor && body.scenarioMinor && !isValidScenario(body.scenarioMajor, body.scenarioMinor)) {
       return NextResponse.json({ error: '场景分类不在允许的列表内' }, { status: 400 });
+    }
+    if (body.dateAdded && isFutureDate(body.dateAdded, todayInShanghai())) {
+      return NextResponse.json({ error: '学习日期不能晚于今天' }, { status: 400 });
     }
     const { status, ...fields } = body;
     const updated = await updateKnowledgePointFields(client, id, fields);
