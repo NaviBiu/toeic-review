@@ -15,10 +15,10 @@ type Candidate = {
   keepVersion: 'new' | 'existing';
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  inserted: '已新增',
-  wrong_again: '已记录为又错一次',
-  skipped: '与现有记录相同,已跳过',
+type ImportResult = {
+  term: string;
+  action: 'inserted' | 'wrong_again' | 'skipped' | 'error';
+  error?: string;
 };
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -26,7 +26,7 @@ const TODAY = new Date().toISOString().slice(0, 10);
 export default function ImportPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<ImportResult[]>([]);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
@@ -42,6 +42,7 @@ export default function ImportPage() {
     e.target.value = ''; // reset now (the captured `file` above is unaffected) so re-selecting the
     // same filename later still fires onChange -- browsers otherwise treat it as "no change"
     setError('');
+    setResults([]);
     setUploading(true);
     try {
       const form = new FormData();
@@ -105,6 +106,18 @@ export default function ImportPage() {
     }
   }
 
+  function showFakeSuccessPreview() {
+    setError('');
+    setConfirmError('');
+    setCandidates([]);
+    setResults(
+      Array.from({ length: 30 }, (_, i) => ({
+        term: `preview-${i + 1}`,
+        action: 'inserted',
+      })),
+    );
+  }
+
   return (
     <main className="min-h-screen bg-stone-50">
       <Header />
@@ -126,6 +139,13 @@ export default function ImportPage() {
           <input type="file" accept=".pdf,.docx" onChange={handleUpload} disabled={uploading} className="hidden" />
         </label>
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        <button
+          type="button"
+          onClick={showFakeSuccessPreview}
+          className="mb-6 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm hover:border-indigo-200 hover:text-indigo-700"
+        >
+          预览导入成功提示
+        </button>
 
         {candidates.length > 0 && (
           <>
@@ -242,22 +262,27 @@ export default function ImportPage() {
             acc[r.action] = (acc[r.action] ?? 0) + 1;
             return acc;
           }, {});
-          const parts = [
-            counts.inserted && `新增 ${counts.inserted} 条`,
-            counts.wrong_again && `标记答错 ${counts.wrong_again} 条`,
-            counts.skipped && `跳过重复 ${counts.skipped} 条`,
-            counts.error && `失败 ${counts.error} 条`,
-          ].filter(Boolean);
+          const submittedCount = results.length;
+          const insertedCount = counts.inserted ?? 0;
+          const failedCount = counts.error ?? 0;
+
           return (
-            <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-              <p className="font-medium text-stone-900">导入完成:{parts.join('、')}</p>
-              <ul className="mt-2 flex flex-col gap-1 text-sm">
-                {results.map((r, i) => (
-                  <li key={i} className={r.action === 'error' ? 'text-red-600' : 'text-stone-500'}>
-                    {r.term}:{r.action === 'error' ? `失败 — ${r.error}` : ACTION_LABELS[r.action] ?? r.action}
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <p className="text-base font-semibold text-stone-900">导入完成</p>
+              <p className="mt-2 text-sm text-stone-600">
+                本次确认导入 {submittedCount} 条，新增成功 {insertedCount} 条。
+              </p>
+              {failedCount > 0 && (
+                <p className="mt-1 text-sm text-red-600">
+                  其中 {failedCount} 条导入失败，请稍后重试。
+                </p>
+              )}
+              <a
+                href="/review"
+                className="mt-4 inline-flex rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+              >
+                进入学习
+              </a>
             </div>
           );
         })()}
