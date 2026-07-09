@@ -28,8 +28,9 @@ export default function ReviewPage() {
   // x = totalToday - correctToday - deletedToday (still-outstanding items --
   // not yet reviewed, or reviewed wrong and still pending -- excludes items
   // that are done for good: answered correctly, or deleted). totalToday is
-  // fixed the first time it's recorded each day and never recomputed after,
-  // even as the live queue shrinks.
+  // allowed to grow if new due items are imported after the first review-page
+  // load of the day, but it does not shrink merely because the live queue gets
+  // shorter while the user reviews.
   const [totalToday, setTotalToday] = useState<number | null>(null);
   const [correctToday, setCorrectToday] = useState(0);
   const [deletedToday, setDeletedToday] = useState(0);
@@ -49,15 +50,15 @@ export default function ReviewPage() {
       setGuess(null);
 
       const totalK = dateKey('reviewTotal', majorFilter);
-      const existingTotal = localStorage.getItem(totalK);
-      if (existingTotal === null) {
-        localStorage.setItem(totalK, String(data.length));
-        setTotalToday(data.length);
-      } else {
-        setTotalToday(Number(existingTotal));
-      }
-      setCorrectToday(Number(localStorage.getItem(dateKey('reviewCorrect', majorFilter)) ?? 0));
-      setDeletedToday(Number(localStorage.getItem(dateKey('reviewDeleted', majorFilter)) ?? 0));
+      const correctCount = Number(localStorage.getItem(dateKey('reviewCorrect', majorFilter)) ?? 0);
+      const deletedCount = Number(localStorage.getItem(dateKey('reviewDeleted', majorFilter)) ?? 0);
+      const existingTotal = Number(localStorage.getItem(totalK) ?? 0);
+      const serverBackedTotal = data.length + correctCount + deletedCount;
+      const nextTotal = Math.max(existingTotal, serverBackedTotal);
+      localStorage.setItem(totalK, String(nextTotal));
+      setTotalToday(nextTotal);
+      setCorrectToday(correctCount);
+      setDeletedToday(deletedCount);
     } catch (err: any) {
       // Without this, a failed fetch left `queue` as [] -- indistinguishable
       // from a genuinely empty "今天没有需要复盘的内容" state.
