@@ -8,6 +8,10 @@ function ratioOf(correct: number, total: number) {
   return total > 0 ? correct / total : null;
 }
 
+function typeLabel(type: string) {
+  return type === 'full_mock' ? '完整模考' : '专项训练';
+}
+
 export default function StatsPage() {
   const [stats, setStats] = useState<any>(null);
   const [exams, setExams] = useState<any[]>([]);
@@ -84,18 +88,21 @@ export default function StatsPage() {
         </section>
 
         <section className="mb-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-lg font-semibold text-stone-900">模考历史(最近 5 次)</h2>
+          <h2 className="mb-3 text-lg font-semibold text-stone-900">练习历史(最近 5 次)</h2>
           {exams.length === 0 ? (
-            <p className="text-sm text-stone-400">还没有模考记录</p>
+            <p className="text-sm text-stone-400">还没有练习记录</p>
           ) : (
             <div className="flex flex-col gap-1.5">
               {exams.slice(0, 5).map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2">
-                  <span className="text-sm text-stone-700">{r.testDate}</span>
-                  <div className="flex gap-3">
-                    {(['part1', 'part2', 'part3', 'part4'] as const).map((p, i) => (
-                      <div key={p} className="flex items-center gap-1 text-xs text-stone-500">
-                        P{i + 1} <AccuracyBadge ratio={ratioOf(r[p].correct, r[p].total)} />
+                <div key={r.id} className="rounded-lg bg-stone-50 px-3 py-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-sm text-stone-700">{r.practiceDate ?? r.testDate}</span>
+                    <span className="text-xs text-stone-400">{typeLabel(r.type)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {(r.parts ?? []).map((p: any) => (
+                      <div key={p.part} className="flex items-center gap-1 text-xs text-stone-500">
+                        P{p.part} <AccuracyBadge ratio={ratioOf(p.correct, p.total)} />
                       </div>
                     ))}
                   </div>
