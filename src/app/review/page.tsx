@@ -5,15 +5,6 @@ import Header from '@/components/Header';
 
 type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
 
-// Scoped by local calendar date AND the active scenario filter, so switching
-// 场景筛选 mid-day tracks its own total instead of corrupting the "全部场景"
-// count (and vice versa) -- a deliberate simplification, not a full
-// per-filter history; see the conversation this shipped from for context.
-function dateKey(prefix: string, filter: string) {
-  const d = new Date();
-  return `${prefix}_${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}_${filter || 'all'}`;
-}
-
 export default function ReviewPage() {
   const [queue, setQueue] = useState<KP[]>([]);
   const [index, setIndex] = useState(0);
@@ -24,16 +15,6 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
-
-  // x = totalToday - correctToday - deletedToday (still-outstanding items --
-  // not yet reviewed, or reviewed wrong and still pending -- excludes items
-  // that are done for good: answered correctly, or deleted). totalToday is
-  // allowed to grow if new due items are imported after the first review-page
-  // load of the day, but it does not shrink merely because the live queue gets
-  // shorter while the user reviews.
-  const [totalToday, setTotalToday] = useState<number | null>(null);
-  const [correctToday, setCorrectToday] = useState(0);
-  const [deletedToday, setDeletedToday] = useState(0);
 
   async function loadQueue() {
     setLoading(true);
@@ -48,17 +29,6 @@ export default function ReviewPage() {
       setIndex(0);
       setPhase('guessing');
       setGuess(null);
-
-      const totalK = dateKey('reviewTotal', majorFilter);
-      const correctCount = Number(localStorage.getItem(dateKey('reviewCorrect', majorFilter)) ?? 0);
-      const deletedCount = Number(localStorage.getItem(dateKey('reviewDeleted', majorFilter)) ?? 0);
-      const existingTotal = Number(localStorage.getItem(totalK) ?? 0);
-      const serverBackedTotal = data.length + correctCount + deletedCount;
-      const nextTotal = Math.max(existingTotal, serverBackedTotal);
-      localStorage.setItem(totalK, String(nextTotal));
-      setTotalToday(nextTotal);
-      setCorrectToday(correctCount);
-      setDeletedToday(deletedCount);
     } catch (err: any) {
       // Without this, a failed fetch left `queue` as [] -- indistinguishable
       // from a genuinely empty "今天没有需要复盘的内容" state.
@@ -170,11 +140,6 @@ export default function ReviewPage() {
       // so today's session can't be finished on it until it's answered right.
       if (guess === 'forgot') {
         setQueue((q) => [...q, current]);
-      } else {
-        const key = dateKey('reviewCorrect', majorFilter);
-        const updated = correctToday + 1;
-        localStorage.setItem(key, String(updated));
-        setCorrectToday(updated);
       }
     }
     setIndex((i) => i + 1);
@@ -202,11 +167,6 @@ export default function ReviewPage() {
       setActionError('网络错误,删除失败,请重试');
       return;
     }
-    const key = dateKey('reviewDeleted', majorFilter);
-    const updated = deletedToday + 1;
-    localStorage.setItem(key, String(updated));
-    setDeletedToday(updated);
-
     setUndo({ id: deletedId, term: deletedTerm, index: deletedIndex });
     setTimeout(() => setUndo((u) => (u?.id === deletedId ? null : u)), 5000);
     setIndex((i) => i + 1);
@@ -230,11 +190,6 @@ export default function ReviewPage() {
       setActionError('网络错误,撤销失败,请重试');
       return;
     }
-    const key = dateKey('reviewDeleted', majorFilter);
-    const updated = Math.max(0, deletedToday - 1);
-    localStorage.setItem(key, String(updated));
-    setDeletedToday(updated);
-
     // Jump back to exactly where it was -- as if the delete never happened,
     // not just "restored in the database but gone from this session".
     setIndex(undo.index);
@@ -243,7 +198,7 @@ export default function ReviewPage() {
     setUndo(null);
   }
 
-  const outstanding = totalToday === null ? null : Math.max(0, totalToday - correctToday - deletedToday);
+  const remaining = Math.max(0, queue.length - index);
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -251,8 +206,8 @@ export default function ReviewPage() {
       <div className="mx-auto max-w-xl px-6 py-12">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>
-          {outstanding !== null && totalToday !== null && totalToday > 0 && (
-            <div className="text-sm font-medium text-stone-400">{outstanding} / {totalToday}</div>
+          {remaining > 0 && (
+            <div className="text-sm font-medium text-stone-400">剩余 {remaining} 个</div>
           )}
         </div>
 
