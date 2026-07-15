@@ -5,6 +5,13 @@ import Header from '@/components/Header';
 import Modal from '@/components/Modal';
 import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 import AccuracyBadge from '@/components/AccuracyBadge';
+import {
+  LISTENING_800_TARGETS,
+  buildPartDiagnostics,
+  ratioOf,
+  type PartDiagnostic,
+  type PartAttempt,
+} from '@/lib/practiceAnalytics';
 
 type PracticeType = 'full_mock' | 'part_drill';
 type PartScore = { part: 1 | 2 | 3 | 4; correct: number; total: number };
@@ -17,13 +24,10 @@ type PracticeRecord = {
   parts: PartScore[];
   scenarios: ScenarioRow[];
 };
+type Tab = 'analysis' | 'records';
 
 const PART_TOTALS: Record<1 | 2 | 3 | 4, number> = { 1: 6, 2: 25, 3: 39, 4: 30 };
 const PART_OPTIONS: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
-
-function ratioOf(correct: number, total: number) {
-  return total > 0 ? correct / total : null;
-}
 
 function defaultParts(type: PracticeType): PartScore[] {
   const parts: Array<1 | 2 | 3 | 4> = type === 'full_mock' ? PART_OPTIONS : [2];
@@ -32,6 +36,111 @@ function defaultParts(type: PracticeType): PartScore[] {
 
 function typeLabel(type: PracticeType) {
   return type === 'full_mock' ? '完整模考' : '专项训练';
+}
+
+function formatPct(ratio: number | null) {
+  return ratio === null ? '-' : `${Math.round(ratio * 100)}%`;
+}
+
+function formatGap(ratio: number | null) {
+  if (ratio === null) return '暂无数据';
+  const points = Math.round(Math.abs(ratio) * 100);
+  if (points === 0) return '贴近基准';
+  return ratio > 0 ? `高于基准 ${points}%` : `低于基准 ${points}%`;
+}
+
+function trendLabel(trend: PartDiagnostic['trend']) {
+  if (trend === 'improving') return '长期趋势上升';
+  if (trend === 'declining') return '长期趋势下降';
+  if (trend === 'flat') return '长期基本持平';
+  return '数据还不够判断趋势';
+}
+
+function diagnosticTone(diagnostic: PartDiagnostic) {
+  if (diagnostic.status === 'at_target') return '稳定达标';
+  if (diagnostic.part === 1) return '基础分不该丢';
+  return '需要额外练习';
+}
+
+function buildHeadline(diagnostics: PartDiagnostic[]) {
+  const weakest = [...diagnostics]
+    .filter((diagnostic) => diagnostic.status === 'below_target')
+    .sort((a, b) => (a.longTermRatio ?? 1) - a.targetRatio - ((b.longTermRatio ?? 1) - b.targetRatio))[0];
+
+  if (!weakest) return '目前有记录的 Part 长期表现都在 800 基准线附近或以上。';
+
+  return `当前最需要补的是 Part ${weakest.part}: 长期正确率${formatGap(
+    (weakest.longTermRatio ?? 0) - weakest.targetRatio,
+  )}, ${trendLabel(weakest.trend)}。`;
+}
+
+function chartY(ratio: number, top = 16, bottom = 112) {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  return bottom - clamped * (bottom - top);
+}
+
+function PartDiagnosticChart({ diagnostic }: { diagnostic: PartDiagnostic }) {
+  const points = diagnostic.attempts;
+  const polyline = points
+    .map((point, index) => {
+      const x = points.length === 1 ? 160 : 24 + (index * 272) / (points.length - 1);
+      const y = chartY(point.ratio ?? 0);
+      return `${x},${y}`;
+    })
+    .join(' ');
+  const targetY = chartY(diagnostic.targetRatio);
+
+  return (
+    <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-stone-900">Part {diagnostic.part}</h2>
+          <p className="mt-1 text-xs text-stone-500">{diagnostic.role}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-sm font-semibold text-stone-900">{diagnosticTone(diagnostic)}</p>
+          <p className="mt-1 text-xs text-stone-500">{trendLabel(diagnostic.trend)}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[1fr_150px] sm:items-center">
+        <svg viewBox="0 0 320 130" className="h-40 w-full overflow-visible">
+          <line x1="24" y1="16" x2="296" y2="16" stroke="#e7e5e4" strokeWidth="1" />
+          <line x1="24" y1="64" x2="296" y2="64" stroke="#f5f5f4" strokeWidth="1" />
+          <line x1="24" y1="112" x2="296" y2="112" stroke="#e7e5e4" strokeWidth="1" />
+          <line x1="24" y1={targetY} x2="296" y2={targetY} stroke="#dc2626" strokeWidth="2" strokeDasharray="5 5" />
+          <text x="300" y={targetY + 4} fill="#dc2626" fontSize="10">
+            {formatPct(diagnostic.targetRatio)}
+          </text>
+          <polyline points={polyline} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          {points.map((point, index) => {
+            const x = points.length === 1 ? 160 : 24 + (index * 272) / (points.length - 1);
+            const y = chartY(point.ratio ?? 0);
+            return (
+              <g key={point.id}>
+                <circle cx={x} cy={y} r="4" fill="#2563eb" />
+                {index === points.length - 1 && (
+                  <text x={Math.min(x + 8, 250)} y={y - 8} fill="#1c1917" fontSize="11" fontWeight="600">
+                    {formatGap(point.gapToTarget)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        <div className="rounded-xl bg-stone-50 p-3">
+          <p className="text-xs text-stone-500">长期正确率</p>
+          <p className="mt-1 text-2xl font-bold text-stone-900">{formatPct(diagnostic.longTermRatio)}</p>
+          <p className="mt-3 text-xs text-stone-500">800 基准</p>
+          <p className="mt-1 text-sm font-medium text-stone-800">
+            至少 {diagnostic.targetCorrect}/{PART_TOTALS[diagnostic.part]}, 最多错 {diagnostic.maxWrong}
+          </p>
+          <p className="mt-3 text-xs font-medium text-stone-600">{formatGap((diagnostic.longTermRatio ?? 0) - diagnostic.targetRatio)}</p>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function MockExamsPage() {
@@ -45,10 +154,22 @@ export default function MockExamsPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [tab, setTab] = useState<Tab>('analysis');
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageHistory = history.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const partAttempts: PartAttempt[] = history.flatMap((record) =>
+    record.parts.map((part) => ({
+      id: record.id,
+      date: record.practiceDate,
+      part: part.part,
+      correct: part.correct,
+      total: part.total,
+    })),
+  );
+  const diagnostics = buildPartDiagnostics(partAttempts);
+  const diagnosticsByPart = new Map(diagnostics.map((diagnostic) => [diagnostic.part, diagnostic]));
 
   async function load() {
     try {
@@ -279,47 +400,102 @@ export default function MockExamsPage() {
           </form>
         </Modal>
 
-        <h2 className="mb-3 text-lg font-semibold text-stone-900">练习历史</h2>
+        <div className="mb-6 flex rounded-xl border border-stone-200 bg-white p-1 shadow-sm">
+          {([
+            ['analysis', '分析'],
+            ['records', '记录'],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={
+                'flex-1 rounded-lg px-4 py-2 text-sm font-medium ' +
+                (tab === value ? 'bg-stone-900 text-white' : 'text-stone-500 hover:bg-stone-50')
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {historyError && <p className="mb-3 text-sm text-red-600">{historyError}</p>}
-        {history.length === 0 && !historyError ? (
-          <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
-            还没有练习记录
-          </div>
+
+        {tab === 'analysis' ? (
+          history.length === 0 && !historyError ? (
+            <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
+              还没有练习记录
+            </div>
+          ) : (
+            <div className="flex flex-col gap-5">
+              <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+                <p className="text-xs font-medium text-stone-500">800 目标诊断</p>
+                <h2 className="mt-2 text-xl font-bold leading-snug text-stone-950">{buildHeadline(diagnostics)}</h2>
+                <p className="mt-3 text-sm leading-6 text-stone-600">
+                  听力目标按 400 分估算: 整体约答对 83 题。Part 1 按满分要求, Part 2/3/4 分别按 88%/82%/77% 作为基准线。
+                </p>
+              </section>
+
+              {PART_OPTIONS.map((part) => {
+                const diagnostic = diagnosticsByPart.get(part);
+                const target = LISTENING_800_TARGETS[part];
+                if (!diagnostic) {
+                  return (
+                    <section key={part} className="rounded-2xl border border-dashed border-stone-200 bg-white p-5 text-stone-500">
+                      <h2 className="text-lg font-semibold text-stone-900">Part {part}</h2>
+                      <p className="mt-2 text-sm">还没有这个 Part 的练习记录。基准线: {formatPct(target.targetRatio)}, 至少 {target.targetCorrect}/{PART_TOTALS[part]}。</p>
+                    </section>
+                  );
+                }
+
+                return <PartDiagnosticChart key={part} diagnostic={diagnostic} />;
+              })}
+            </div>
+          )
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-stone-50 text-xs font-medium text-stone-500">
-                <tr>
-                  <th className="px-4 py-3.5 text-left">日期</th>
-                  <th className="py-3.5 text-left">类型</th>
-                  <th className="py-3.5 text-left">Part 成绩</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageHistory.map((r, idx) => (
-                  <tr key={r.id} className={idx % 2 === 1 ? 'bg-stone-50/60' : ''}>
-                    <td className="px-4 py-4 text-stone-700">{r.practiceDate}</td>
-                    <td className="py-4 text-stone-600">
-                      <div>{typeLabel(r.type)}</div>
-                      {r.title && <div className="mt-1 text-xs text-stone-400">{r.title}</div>}
-                    </td>
-                    <td className="py-4">
-                      <div className="flex flex-wrap gap-2">
-                        {r.parts.map((part) => (
-                          <div key={part.part} className="flex items-center gap-1 rounded-lg bg-stone-50 px-2 py-1 text-xs text-stone-600">
-                            P{part.part} {part.correct}/{part.total}
-                            <AccuracyBadge ratio={ratioOf(part.correct, part.total)} />
+          <>
+            <h2 className="mb-3 text-lg font-semibold text-stone-900">练习历史</h2>
+            {history.length === 0 && !historyError ? (
+              <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
+                还没有练习记录
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+                <table className="w-full text-sm">
+                  <thead className="bg-stone-50 text-xs font-medium text-stone-500">
+                    <tr>
+                      <th className="px-4 py-3.5 text-left">日期</th>
+                      <th className="py-3.5 text-left">类型</th>
+                      <th className="py-3.5 text-left">Part 成绩</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageHistory.map((r, idx) => (
+                      <tr key={r.id} className={idx % 2 === 1 ? 'bg-stone-50/60' : ''}>
+                        <td className="px-4 py-4 text-stone-700">{r.practiceDate}</td>
+                        <td className="py-4 text-stone-600">
+                          <div>{typeLabel(r.type)}</div>
+                          {r.title && <div className="mt-1 text-xs text-stone-400">{r.title}</div>}
+                        </td>
+                        <td className="py-4">
+                          <div className="flex flex-wrap gap-2">
+                            {r.parts.map((part) => (
+                              <div key={part.part} className="flex items-center gap-1 rounded-lg bg-stone-50 px-2 py-1 text-xs text-stone-600">
+                                P{part.part} {part.correct}/{part.total}
+                                <AccuracyBadge ratio={ratioOf(part.correct, part.total)} />
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
+          </>
         )}
-        <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
       </div>
     </main>
   );
