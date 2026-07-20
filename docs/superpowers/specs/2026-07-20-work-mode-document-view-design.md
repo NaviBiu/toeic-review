@@ -11,6 +11,7 @@ When work mode is active, the application should read at a glance as an English 
 - Keep the English navigation hidden by default in work mode.
 - Open and close the navigation from the menu button. The menu is a vertical document index, so it never causes horizontal page overflow.
 - Keep the existing mode toggle available as a small, neutral document control.
+- Add an `Open another document` control that rotates through one of five bundled document skins without network or API calls. Consecutive clicks must not keep the same skin.
 
 ## English work-mode vocabulary
 
@@ -32,6 +33,10 @@ The same approach will be available to other routes through a small display-copy
 - Avoid colourful study-app styling when work mode is active.
 - Do not suppress the actual English term and example, since they plausibly resemble document content.
 - Do not render Chinese user-interface text anywhere in the work-mode review route.
+- Keep the palette neutral: white, grey, slate, and restrained navy only. Skin variety must come primarily from different layouts, document metadata, headings, paper treatments, and density rather than bright colours.
+- Provide five fixed skins: requirements specification, project work board, meeting notes, release summary, and control checklist.
+- In work mode, non-review routes show a static route-specific English document overlay so their original Chinese UI cannot appear after a navigation click.
+- The review route remains interactive. `Confirmed` records the normal correct answer; `Needs follow-up` records the normal incorrect answer. Its labels, remaining count, filter, loading, errors, empty state, undo controls, and action feedback are English.
 
 ## State and accessibility
 

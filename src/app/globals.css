@@ -24,3 +24,82 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+[data-work-mode="true"] body {
+  overflow-x: clip;
+}
+
+[data-work-mode="true"] .work-document-overlay {
+  background-color: #f4f6f8;
+  background-image: linear-gradient(#e8edf2 1px, transparent 1px), linear-gradient(90deg, #e8edf2 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+[data-work-mode="true"][data-work-skin="project-board"] .work-document-sheet {
+  max-width: 1120px;
+  border-left: 12px solid #334155;
+}
+
+[data-work-mode="true"][data-work-skin="meeting-notes"] .work-document-sheet {
+  max-width: 760px;
+  box-shadow: none;
+}
+
+[data-work-mode="true"][data-work-skin="meeting-notes"] .work-document-overlay {
+  background-image: repeating-linear-gradient(0deg, #f6f7f8 0, #f6f7f8 31px, #e4e8ed 32px);
+}
+
+[data-work-mode="true"][data-work-skin="release-summary"] .work-document-sheet {
+  border-top: 6px solid #334155;
+}
+
+[data-work-mode="true"][data-work-skin="control-checklist"] .work-document-sheet {
+  max-width: 880px;
+  border-width: 2px;
+  box-shadow: none;
+}
+
+[data-work-mode="true"] body {
+  background:
+    linear-gradient(#f8fafc 31px, transparent 31px),
+    linear-gradient(90deg, #e2e8f0 1px, transparent 1px),
+    #f8fafc;
+  background-size: 100% 32px, 32px 100%;
+  color: #0f172a;
+}
+
+[data-work-mode="true"] main {
+  background: transparent;
+}
+
+[data-work-mode="true"] main > div {
+  max-width: 960px;
+}
+
+[data-work-mode="true"] h1,
+[data-work-mode="true"] h2 {
+  color: #0f172a;
+}
+
+[data-work-mode="true"] section,
+[data-work-mode="true"] table,
+[data-work-mode="true"] form {
+  box-shadow: none;
+}
+
+[data-work-mode="true"] .bg-indigo-600 {
+  background-color: #334155;
+}
+
+[data-work-mode="true"] .text-indigo-600 {
+  color: #334155;
+}
+
+[data-work-mode="true"] .hover\:bg-indigo-700:hover {
+  background-color: #1e293b;
+}
+
+[data-work-mode="true"] .hover\:text-indigo-700:hover,
+[data-work-mode="true"] .hover\:text-indigo-600:hover {
+  color: #1e293b;
+}

@@ -2,10 +2,13 @@
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
 import Header from '@/components/Header';
+import { useWorkMode } from '@/hooks/useWorkMode';
+import { workReviewCopy } from '@/lib/disguiseMode';
 
 type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
 
 export default function ReviewPage() {
+  const { enabled: workMode, skin } = useWorkMode();
   const [queue, setQueue] = useState<KP[]>([]);
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<'guessing' | 'revealed'>('guessing');
@@ -199,6 +202,54 @@ export default function ReviewPage() {
   }
 
   const remaining = Math.max(0, queue.length - index);
+
+  if (workMode) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <Header />
+        <div className="work-review-page mx-auto max-w-4xl px-4 py-8 sm:px-6">
+          <section className="border border-slate-300 bg-white shadow-sm">
+            <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
+              <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
+              <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                <h1 className="font-mono text-2xl font-semibold text-slate-950">{workReviewCopy.title}</h1>
+                <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-500">{remaining > 0 ? workReviewCopy.pending(remaining) : 'Review complete'}</span>
+              </div>
+            </header>
+            <div className="p-6 sm:p-8">
+              <div className="grid gap-4 border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-600 sm:grid-cols-3">
+                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Workstream</p><p className="mt-1 text-slate-800">{workReviewCopy.allWorkstreams}</p></div>
+                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Document state</p><p className="mt-1 text-slate-800">In review</p></div>
+                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Reference</p><p className="mt-1 text-slate-800">{skin.documentId}</p></div>
+              </div>
+
+              {actionError && <p className="mt-4 border-l-2 border-amber-600 bg-amber-50 px-3 py-2 text-sm text-amber-800">{workReviewCopy.saveError}</p>}
+              {loading ? (
+                <p className="py-12 text-center font-mono text-sm text-slate-500">{workReviewCopy.loading}</p>
+              ) : loadError ? (
+                <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.loadError}</p>
+              ) : !current ? (
+                <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.empty}</p>
+              ) : (
+                <section className="mt-6 border border-slate-300 bg-white">
+                  <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[11px] uppercase tracking-wide text-slate-500"><span>Current item</span><span>Priority: standard</span></header>
+                  <div className="p-6">
+                    <div className="flex items-center gap-2"><p className={'font-mono text-2xl font-semibold text-slate-950' + (phase === 'guessing' ? ' blur-md select-none' : '')}>{current.term}</p><button onClick={() => speak(current.term)} title={workReviewCopy.termAudio} className="p-1 text-slate-500 hover:text-slate-900">Audio</button></div>
+                    <div className="mt-3 flex items-center gap-2"><p className={'font-mono text-sm italic text-slate-500' + (phase === 'guessing' ? ' blur-md select-none' : '')}>{current.example}</p><button onClick={() => speak(current.example)} title={workReviewCopy.exampleAudio} className="p-1 text-slate-500 hover:text-slate-900">Audio</button></div>
+                    {phase === 'guessing' ? (
+                      <div className="mt-7 flex flex-col gap-3 sm:flex-row"><button onClick={() => pickGuess('remember')} className="flex-1 border border-slate-700 bg-slate-700 py-3 font-mono text-sm text-white hover:bg-slate-800">{workReviewCopy.confirmed}</button><button onClick={() => pickGuess('forgot')} className="flex-1 border border-slate-300 bg-white py-3 font-mono text-sm text-slate-700 hover:bg-slate-50">{workReviewCopy.followUp}</button></div>
+                    ) : (
+                      <div className="mt-6 border-t border-slate-200 pt-5"><p className="font-mono text-sm text-slate-600">Decision recorded for this reference. Continue when ready to review the next item.</p><div className="mt-5 flex items-center justify-between gap-3"><button onClick={revoke} title={workReviewCopy.revert} className="border border-slate-300 px-3 py-2 font-mono text-xs text-slate-600 hover:bg-slate-50">{workReviewCopy.revert}</button><button onClick={next} className="border border-slate-700 bg-slate-700 px-4 py-2 font-mono text-sm text-white hover:bg-slate-800">{workReviewCopy.continue}</button></div></div>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-stone-50">
