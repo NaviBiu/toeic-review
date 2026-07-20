@@ -63,6 +63,40 @@ body {
   max-width: 56rem;
 }
 
+/* Work review skin classes deliberately own the visible layout. They also
+   keep the empty-queue state distinct, where no review card is present. */
+.work-review-page.work-skin-requirements { max-width: 56rem !important; }
+.work-review-page.work-skin-requirements .work-review-sheet { border-top: 4px solid #334155; }
+.work-review-page.work-skin-requirements .work-review-empty { background: repeating-linear-gradient(0deg, #fff 0, #fff 27px, #edf1f5 28px); }
+
+.work-review-page.work-skin-project-board { max-width: 72rem !important; }
+.work-review-page.work-skin-project-board .work-review-sheet { border-left: 16px solid #334155; }
+.work-review-page.work-skin-project-board .work-review-summary { border-radius: 0; background: #e9eef4; }
+.work-review-page.work-skin-project-board .work-review-empty { border: 1px dashed #94a3b8; background: #f8fafc; }
+
+.work-review-page.work-skin-meeting-notes { max-width: 48rem !important; background: repeating-linear-gradient(0deg, transparent 0, transparent 31px, #dce4ed 32px); }
+.work-review-page.work-skin-meeting-notes .work-review-sheet { box-shadow: none; }
+.work-review-page.work-skin-meeting-notes .work-review-sheet > header,
+.work-review-page.work-skin-meeting-notes .work-review-sheet > div { padding-left: 4.5rem; padding-right: 4.5rem; }
+.work-review-page.work-skin-meeting-notes .work-review-summary { border-left: 3px solid #64748b; background: #fff; }
+
+.work-review-page.work-skin-release-summary { max-width: 64rem !important; }
+.work-review-page.work-skin-release-summary .work-review-sheet { overflow: hidden; border-top: 8px solid #26384f; border-radius: .375rem; }
+.work-review-page.work-skin-release-summary .work-review-sheet > header { background: #26384f; }
+.work-review-page.work-skin-release-summary .work-review-sheet > header p,
+.work-review-page.work-skin-release-summary .work-review-sheet > header h1 { color: #fff; }
+.work-review-page.work-skin-release-summary .work-review-empty { background: #f1f5f9; border-top: 1px solid #cbd5e1; }
+
+.work-review-page.work-skin-control-checklist { max-width: 52rem !important; }
+.work-review-page.work-skin-control-checklist .work-review-sheet { border: 2px solid #334155; box-shadow: none; }
+.work-review-page.work-skin-control-checklist .work-review-summary { background: #fff; }
+.work-review-page.work-skin-control-checklist .work-review-empty::before { content: "□  ROUTINE CONTROLS VERIFIED"; display: block; margin-bottom: 1rem; color: #475569; font-size: .75rem; }
+
+@media (max-width: 640px) {
+  .work-review-page.work-skin-meeting-notes .work-review-sheet > header,
+  .work-review-page.work-skin-meeting-notes .work-review-sheet > div { padding-left: 1.5rem; padding-right: 1.5rem; }
+}
+
 [data-work-mode="true"][data-work-skin="requirements"] .work-review-page::before {
   content: "INTERNAL REQUIREMENTS DOCUMENT";
   display: block;

@@ -6,14 +6,15 @@ export type WorkSkin = {
   id: 'requirements' | 'project-board' | 'meeting-notes' | 'release-summary' | 'control-checklist';
   title: string;
   documentId: string;
+  reviewTitle: string;
 };
 
 export const workSkins: WorkSkin[] = [
-  { id: 'requirements', title: 'Requirements Review', documentId: 'RFC-L-800 / draft' },
-  { id: 'project-board', title: 'Project Workspace', documentId: 'PRJ-DELTA / active' },
-  { id: 'meeting-notes', title: 'Meeting Notes', documentId: 'MIN-0720 / notes' },
-  { id: 'release-summary', title: 'Release Summary', documentId: 'REL-12 / gate' },
-  { id: 'control-checklist', title: 'Control Checklist', documentId: 'CTL-200 / current' },
+  { id: 'requirements', title: 'Requirements Review', documentId: 'RFC-L-800 / draft', reviewTitle: 'Daily Review Requirements' },
+  { id: 'project-board', title: 'Project Workspace', documentId: 'PRJ-DELTA / active', reviewTitle: 'Project Readiness Board' },
+  { id: 'meeting-notes', title: 'Meeting Notes', documentId: 'MIN-0720 / notes', reviewTitle: 'Working Session Notes' },
+  { id: 'release-summary', title: 'Release Summary', documentId: 'REL-12 / gate', reviewTitle: 'Release Gate Summary' },
+  { id: 'control-checklist', title: 'Control Checklist', documentId: 'CTL-200 / current', reviewTitle: 'Control Verification Log' },
 ];
 
 export function getWorkSkin(id: string | null) {

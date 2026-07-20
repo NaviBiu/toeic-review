@@ -207,12 +207,12 @@ export default function ReviewPage() {
     return (
       <main className="min-h-screen bg-slate-50">
         <Header />
-        <div className="work-review-page mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <div className={`work-review-page work-skin-${skin.id} mx-auto max-w-4xl px-4 py-8 sm:px-6`}>
           <section className="work-review-sheet border border-slate-300 bg-white shadow-sm">
             <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
               <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                <h1 className="font-mono text-2xl font-semibold text-slate-950">{workReviewCopy.title}</h1>
+                <h1 className="font-mono text-2xl font-semibold text-slate-950">{skin.reviewTitle}</h1>
                 <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-500">{remaining > 0 ? workReviewCopy.pending(remaining) : 'Review complete'}</span>
               </div>
             </header>
@@ -229,7 +229,7 @@ export default function ReviewPage() {
               ) : loadError ? (
                 <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.loadError}</p>
               ) : !current ? (
-                <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.empty}</p>
+                <div className="work-review-empty py-10 text-center font-mono text-sm text-slate-600"><p>{workReviewCopy.empty}</p><p className="mt-3 text-[11px] uppercase tracking-wide text-slate-400">No action items require acknowledgement.</p></div>
               ) : (
                 <section className="work-review-item mt-6 border border-slate-300 bg-white">
                   <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[11px] uppercase tracking-wide text-slate-500"><span>Current item</span><span>Priority: standard</span></header>
