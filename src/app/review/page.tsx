@@ -208,7 +208,7 @@ export default function ReviewPage() {
       <main className="min-h-screen bg-slate-50">
         <Header />
         <div className="work-review-page mx-auto max-w-4xl px-4 py-8 sm:px-6">
-          <section className="border border-slate-300 bg-white shadow-sm">
+          <section className="work-review-sheet border border-slate-300 bg-white shadow-sm">
             <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
               <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
@@ -217,7 +217,7 @@ export default function ReviewPage() {
               </div>
             </header>
             <div className="p-6 sm:p-8">
-              <div className="grid gap-4 border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-600 sm:grid-cols-3">
+              <div className="work-review-summary grid gap-4 border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-600 sm:grid-cols-3">
                 <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Workstream</p><p className="mt-1 text-slate-800">{workReviewCopy.allWorkstreams}</p></div>
                 <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Document state</p><p className="mt-1 text-slate-800">In review</p></div>
                 <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Reference</p><p className="mt-1 text-slate-800">{skin.documentId}</p></div>
@@ -231,7 +231,7 @@ export default function ReviewPage() {
               ) : !current ? (
                 <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.empty}</p>
               ) : (
-                <section className="mt-6 border border-slate-300 bg-white">
+                <section className="work-review-item mt-6 border border-slate-300 bg-white">
                   <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[11px] uppercase tracking-wide text-slate-500"><span>Current item</span><span>Priority: standard</span></header>
                   <div className="p-6">
                     <div className="flex items-center gap-2"><p className={'font-mono text-2xl font-semibold text-slate-950' + (phase === 'guessing' ? ' blur-md select-none' : '')}>{current.term}</p><button onClick={() => speak(current.term)} title={workReviewCopy.termAudio} className="p-1 text-slate-500 hover:text-slate-900">Audio</button></div>

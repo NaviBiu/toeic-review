@@ -1,13 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { studyNav, workModeNav } from '@/lib/disguiseMode';
+import { studyNav } from '@/lib/disguiseMode';
 import { useWorkMode } from '@/hooks/useWorkMode';
 
 export default function Header() {
   const { enabled, skin, setEnabled, rotateSkin } = useWorkMode();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!enabled) {
     return (
@@ -35,20 +33,9 @@ export default function Header() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button type="button" onClick={() => setEnabled(false)} className="border border-slate-300 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-600 hover:bg-slate-100">Study mode</button>
-          <button type="button" onClick={rotateSkin} className="hidden border border-slate-600 bg-slate-700 px-2 py-1.5 font-mono text-[11px] text-white hover:bg-slate-800 md:block">Open another document</button>
-          <button type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label="Toggle document index" className="inline-flex items-center gap-2 border border-slate-300 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-700 hover:bg-slate-100">
-            <span className="grid gap-0.5"><i className="block h-px w-3 bg-slate-600" /><i className="block h-px w-3 bg-slate-600" /><i className="block h-px w-3 bg-slate-600" /></span>
-            Index
-          </button>
+          <button type="button" onClick={rotateSkin} className="border border-slate-600 bg-slate-700 px-2 py-1.5 font-mono text-[11px] text-white hover:bg-slate-800">Open another document</button>
         </div>
       </div>
-      {menuOpen && (
-        <nav className="border-t border-slate-200 bg-white">
-          <div className="mx-auto grid max-w-5xl grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-2 lg:grid-cols-3 sm:px-6">
-            {workModeNav.map((item) => <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className="border-l-2 border-slate-200 px-3 py-2 font-mono text-xs uppercase tracking-wide text-slate-600 hover:border-slate-700 hover:bg-slate-50 hover:text-slate-950">{item.label}</Link>)}
-          </div>
-        </nav>
-      )}
     </header>
   );
 }
