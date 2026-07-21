@@ -213,13 +213,13 @@ export default function ReviewPage() {
               <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
                 <h1 className="font-mono text-2xl font-semibold text-slate-950">{skin.reviewTitle}</h1>
-                <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-500">{remaining > 0 ? workReviewCopy.pending(remaining) : 'Review complete'}</span>
+                <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-600">{workReviewCopy.pending(remaining)}</span>
               </div>
             </header>
             <div className="p-6 sm:p-8">
               <div className="work-review-purpose grid gap-8 border-b border-slate-200 pb-8 lg:grid-cols-[1.15fr_.85fr]">
                 <div><p className="font-mono text-[11px] uppercase tracking-wide text-slate-500">Document purpose</p><p className="mt-3 text-base leading-7 text-slate-600">This document records the current review queue and confirms whether each referenced item satisfies the expected interpretation and context requirements.</p></div>
-                <div className="work-review-summary grid grid-cols-2 border border-slate-300 font-mono text-xs text-slate-600"><div className="border-b border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Owner</p><p className="mt-1 text-slate-900">Language Ops</p></div><div className="border-b border-slate-300 p-3"><p className="text-[10px] text-slate-400">Revision</p><p className="mt-1 text-slate-900">0.8</p></div><div className="border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Review state</p><p className="mt-1 text-slate-900">{remaining > 0 ? workReviewCopy.pending(remaining) : 'Review complete'}</p></div><div className="p-3"><p className="text-[10px] text-slate-400">Classification</p><p className="mt-1 text-slate-900">Internal</p></div></div>
+                <div className="work-review-summary grid grid-cols-2 border border-slate-300 font-mono text-xs text-slate-600"><div className="border-b border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Owner</p><p className="mt-1 text-slate-900">Language Ops</p></div><div className="border-b border-slate-300 p-3"><p className="text-[10px] text-slate-400">Revision</p><p className="mt-1 text-slate-900">0.8</p></div><div className="border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Items pending</p><p className="mt-1 text-slate-900">{workReviewCopy.pending(remaining)}</p></div><div className="p-3"><p className="text-[10px] text-slate-400">Classification</p><p className="mt-1 text-slate-900">Internal</p></div></div>
               </div>
 
               <p className="mt-8 font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Review decision</p>
