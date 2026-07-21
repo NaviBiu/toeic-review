@@ -207,8 +207,8 @@ export default function ReviewPage() {
     return (
       <main className="min-h-screen bg-slate-50">
         <Header />
-        <div className={`work-review-page work-skin-${skin.id} mx-auto max-w-4xl px-4 py-8 sm:px-6`}>
-          <section className="work-review-sheet border border-slate-300 bg-white shadow-sm">
+        <div className={`work-review-page work-review-document work-skin-${skin.id} mx-auto max-w-4xl px-4 py-8 sm:px-6`}>
+          <section className="work-review-sheet work-review-document-sheet border border-slate-300 bg-white shadow-sm">
             <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
               <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
@@ -217,11 +217,12 @@ export default function ReviewPage() {
               </div>
             </header>
             <div className="p-6 sm:p-8">
-              <div className="work-review-summary grid gap-4 border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-600 sm:grid-cols-3">
-                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Workstream</p><p className="mt-1 text-slate-800">{workReviewCopy.allWorkstreams}</p></div>
-                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Document state</p><p className="mt-1 text-slate-800">In review</p></div>
-                <div><p className="text-[10px] uppercase tracking-wide text-slate-400">Reference</p><p className="mt-1 text-slate-800">{skin.documentId}</p></div>
+              <div className="work-review-purpose grid gap-8 border-b border-slate-200 pb-8 lg:grid-cols-[1.15fr_.85fr]">
+                <div><p className="font-mono text-[11px] uppercase tracking-wide text-slate-500">Document purpose</p><p className="mt-3 text-base leading-7 text-slate-600">This document records the current review queue and confirms whether each referenced item satisfies the expected interpretation and context requirements.</p></div>
+                <div className="work-review-summary grid grid-cols-2 border border-slate-300 font-mono text-xs text-slate-600"><div className="border-b border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Owner</p><p className="mt-1 text-slate-900">Language Ops</p></div><div className="border-b border-slate-300 p-3"><p className="text-[10px] text-slate-400">Revision</p><p className="mt-1 text-slate-900">0.8</p></div><div className="border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Review state</p><p className="mt-1 text-slate-900">{remaining > 0 ? workReviewCopy.pending(remaining) : 'Review complete'}</p></div><div className="p-3"><p className="text-[10px] text-slate-400">Classification</p><p className="mt-1 text-slate-900">Internal</p></div></div>
               </div>
+
+              <p className="mt-8 font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Review decision</p>
 
               {actionError && <p className="mt-4 border-l-2 border-amber-600 bg-amber-50 px-3 py-2 text-sm text-amber-800">{workReviewCopy.saveError}</p>}
               {loading ? (
@@ -244,6 +245,7 @@ export default function ReviewPage() {
                   </div>
                 </section>
               )}
+              <div className="mt-10 grid gap-8 border-t border-slate-200 pt-8 sm:grid-cols-2"><div><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Acceptance criteria</p><ul className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-sm text-slate-600"><li>Statement is recognised in context.</li><li>Reference material is complete.</li><li>Decision can be recorded.</li></ul></div><div><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Change record</p><ul className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-sm text-slate-600"><li>Review terminology updated today.</li><li>Queue status synchronized.</li><li>Baseline criteria retained.</li></ul></div></div>
             </div>
           </section>
         </div>

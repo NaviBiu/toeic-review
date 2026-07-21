@@ -230,3 +230,17 @@ body {
 [data-work-mode="true"] .hover\:text-indigo-600:hover {
   color: #1e293b;
 }
+
+/* Final work-document layout. This deliberately comes after legacy work-mode
+   rules so the reviewed prototype structure owns spacing and width. */
+.work-review-document { max-width: 1300px !important; padding-top: 2.5rem; }
+.work-review-document-sheet { border-top: 5px solid #334155; box-shadow: 0 18px 40px rgba(30, 41, 59, .08) !important; }
+.work-review-document .work-review-item { margin-top: .75rem; }
+.work-review-document .work-review-empty { min-height: 13rem; display: grid; place-content: center; }
+.work-review-document.work-skin-meeting-notes { max-width: 980px !important; }
+.work-review-document.work-skin-meeting-notes .work-review-document-sheet { box-shadow: none !important; }
+.work-review-document.work-skin-project-board .work-review-document-sheet { border-left: 14px solid #334155; }
+.work-review-document.work-skin-release-summary .work-review-document-sheet > header { background: #26384f; }
+.work-review-document.work-skin-release-summary .work-review-document-sheet > header h1,
+.work-review-document.work-skin-release-summary .work-review-document-sheet > header p { color: #fff; }
+.work-review-document.work-skin-control-checklist .work-review-document-sheet { border: 2px solid #334155; box-shadow: none !important; }
