@@ -7,9 +7,9 @@ import { useWorkMode } from '@/hooks/useWorkMode';
 export default function WorkModeDocumentOverlay() {
   const pathname = usePathname();
   const { enabled, skin } = useWorkMode();
-  // Authentication must always remain usable; work mode only disguises the
-  // authenticated study routes and must never cover the real login form.
-  if (!enabled || pathname === '/review' || pathname === '/login') return null;
+  // Keep entry and study pages usable; disguise mode is only rendered on
+  // secondary authenticated routes and must never cover real app content.
+  if (!enabled || pathname === '/' || pathname === '/review' || pathname === '/login') return null;
 
   return (
     <section className="work-document-overlay fixed inset-x-0 bottom-0 top-16 z-40 overflow-y-auto bg-slate-50 px-4 py-8 sm:px-6">
