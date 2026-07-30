@@ -15,6 +15,8 @@ export default function ReviewPage() {
   const [guess, setGuess] = useState<'remember' | 'forgot' | null>(null);
   const [undo, setUndo] = useState<{ id: number; term: string; index: number } | null>(null);
   const [majorFilter, setMajorFilter] = useState('');
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceName, setVoiceName] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -43,6 +45,28 @@ export default function ReviewPage() {
 
   useEffect(() => { loadQueue(); }, [majorFilter]);
 
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const loadVoices = () => {
+      const englishVoices = window.speechSynthesis.getVoices()
+        .filter((voice) => /^en[-_]/i.test(voice.lang));
+      setVoices(englishVoices);
+      const saved = window.localStorage.getItem('toeic-speech-voice');
+      const preferred = englishVoices.find((voice) => voice.name === saved)
+        ?? englishVoices.find((voice) => /natural|online/i.test(voice.name))
+        ?? englishVoices.find((voice) => /^en-US/i.test(voice.lang));
+      if (preferred) setVoiceName(preferred.name);
+    };
+    loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+  }, []);
+
+  function changeVoice(name: string) {
+    setVoiceName(name);
+    window.localStorage.setItem('toeic-speech-voice', name);
+  }
+
   const current = queue[index];
 
   // Browser-native TTS (Web Speech API) -- zero API cost, runs entirely on
@@ -52,6 +76,7 @@ export default function ReviewPage() {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
+    utterance.voice = voices.find((voice) => voice.name === voiceName) ?? null;
     window.speechSynthesis.speak(utterance);
   }
 
@@ -68,6 +93,7 @@ export default function ReviewPage() {
       if (!text) { playNext(); return; }
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
+      utterance.voice = voices.find((voice) => voice.name === voiceName) ?? null;
       utterance.onend = playNext;
       window.speechSynthesis.speak(utterance);
     }
@@ -213,7 +239,10 @@ export default function ReviewPage() {
               <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
                 <h1 className="font-mono text-2xl font-semibold text-slate-950">{skin.reviewTitle}</h1>
-                <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-600">{workReviewCopy.pending(remaining)}</span>
+                <div className="flex items-center gap-3">
+                  {voices.length > 0 && <select aria-label="Speech voice" title="Speech voice" value={voiceName} onChange={(e) => changeVoice(e.target.value)} className="max-w-44 border border-slate-300 bg-white px-2 py-1 font-mono text-[11px] text-slate-600"><option value="">Speech voice</option>{voices.map((voice) => <option key={`${voice.name}-${voice.lang}`} value={voice.name}>{voice.name} ({voice.lang})</option>)}</select>}
+                  <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-600">{workReviewCopy.pending(remaining)}</span>
+                </div>
               </div>
             </header>
             <div className="p-6 sm:p-8">
@@ -272,6 +301,19 @@ export default function ReviewPage() {
           <option value="">全部场景</option>
           {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
+
+        {voices.length > 0 && (
+          <select
+            aria-label="选择英语音色"
+            title="选择英语音色"
+            value={voiceName}
+            onChange={(e) => changeVoice(e.target.value)}
+            className="mb-6 ml-2 max-w-56 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 shadow-sm"
+          >
+            <option value="">选择英语音色</option>
+            {voices.map((voice) => <option key={`${voice.name}-${voice.lang}`} value={voice.name}>{voice.name} ({voice.lang})</option>)}
+          </select>
+        )}
 
         {actionError && <p className="mb-4 text-sm text-red-600">{actionError}</p>}
 
