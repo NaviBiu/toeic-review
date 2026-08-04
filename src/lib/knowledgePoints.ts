@@ -140,6 +140,17 @@ export async function softDeleteKnowledgePoint(client: VercelClient, id: number)
   return mapRow(rows[0]);
 }
 
+export async function markKnowledgePointMastered(client: VercelClient, id: number): Promise<KnowledgePoint> {
+  const { rows } = await client.query(
+    `UPDATE knowledge_points
+     SET status = 'mastered', next_review_date = NULL, updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
+  );
+  return mapRow(rows[0]);
+}
+
 export async function restoreKnowledgePoint(client: VercelClient, id: number, today: string): Promise<KnowledgePoint> {
   const { rows } = await client.query(
     `UPDATE knowledge_points

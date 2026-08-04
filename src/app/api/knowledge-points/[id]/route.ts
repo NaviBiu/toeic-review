@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/db';
-import { updateKnowledgePointFields, softDeleteKnowledgePoint, restoreKnowledgePoint } from '@/lib/knowledgePoints';
+import { updateKnowledgePointFields, softDeleteKnowledgePoint, markKnowledgePointMastered, restoreKnowledgePoint } from '@/lib/knowledgePoints';
 import { isValidScenario } from '@/lib/scenarios';
 import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
 
@@ -13,6 +13,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     if (body.status === 'deleted') {
       return NextResponse.json(await softDeleteKnowledgePoint(client, id));
+    }
+    if (body.status === 'mastered') {
+      return NextResponse.json(await markKnowledgePointMastered(client, id));
     }
     if (body.status === 'active') {
       return NextResponse.json(await restoreKnowledgePoint(client, id, todayInShanghai()));
