@@ -16,6 +16,7 @@ import {
 type PracticeType = 'full_mock' | 'part_drill';
 type PartScore = { part: 1 | 2 | 3 | 4; correct: number; total: number };
 type ScenarioRow = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
+type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
 type PracticeRecord = {
   id: number;
   practiceDate: string;
@@ -23,6 +24,7 @@ type PracticeRecord = {
   title: string | null;
   parts: PartScore[];
   scenarios: ScenarioRow[];
+  attachments: PracticeAttachment[];
 };
 type Tab = 'analysis' | 'records';
 
@@ -151,6 +153,7 @@ export default function MockExamsPage() {
   const [title, setTitle] = useState('');
   const [parts, setParts] = useState<PartScore[]>(defaultParts('full_mock'));
   const [scenarios, setScenarios] = useState<ScenarioRow[]>([]);
+  const [attachments, setAttachments] = useState<PracticeAttachment[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
@@ -188,7 +191,31 @@ export default function MockExamsPage() {
     setTitle('');
     setParts(defaultParts('full_mock'));
     setScenarios([]);
+    setAttachments([]);
     setError('');
+  }
+
+  async function handleAttachmentChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 5) { setError('最多上传 5 张错题图片'); return; }
+    if (files.some((file) => !file.type.startsWith('image/'))) { setError('错题附件只能是图片'); return; }
+    if (files.reduce((sum, file) => sum + file.size, 0) > 3_000_000) { setError('错题图片合计不能超过约 3 MB'); return; }
+    try {
+      const next = await Promise.all(files.map((file) => new Promise<PracticeAttachment>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ id: 0, name: file.name, mimeType: file.type, dataUrl: String(reader.result) });
+        reader.onerror = () => reject(new Error('图片读取失败'));
+        reader.readAsDataURL(file);
+      })));
+      setError('');
+      setAttachments(next);
+    } catch (err: any) {
+      setError(err.message ?? '图片读取失败');
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((current) => current.filter((_, i) => i !== index));
   }
 
   function changeType(type: PracticeType) {
@@ -239,6 +266,7 @@ export default function MockExamsPage() {
           title: title.trim() || null,
           parts,
           scenarios,
+          attachments: attachments.map(({ name, mimeType, dataUrl }) => ({ name, mimeType, dataUrl })),
         }),
       });
       if (!res.ok) {
@@ -389,6 +417,13 @@ export default function MockExamsPage() {
               </div>
             </div>
 
+            <div>
+              <p className="mb-2 text-xs font-medium text-stone-400">错题图片（可选）</p>
+              <input type="file" accept="image/*" multiple onChange={handleAttachmentChange} className="block w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600" />
+              {attachments.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-stone-50"><img src={attachment.dataUrl} alt={attachment.name} className="h-24 w-full object-cover" /><button type="button" onClick={() => removeAttachment(index)} className="absolute right-1 top-1 rounded-full bg-white/90 px-2 py-0.5 text-xs text-red-600 shadow-sm">×</button><p className="truncate px-2 py-1 text-xs text-stone-500">{attachment.name}</p></div>)}</div>}
+              <p className="mt-2 text-xs text-stone-400">支持多张图片，合计不超过约 3 MB。</p>
+            </div>
+
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button
               type="submit"
@@ -467,6 +502,7 @@ export default function MockExamsPage() {
                       <th className="px-4 py-3.5 text-left">日期</th>
                       <th className="py-3.5 text-left">类型</th>
                       <th className="py-3.5 text-left">Part 成绩</th>
+                      <th className="py-3.5 text-left">错题图片</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -486,6 +522,9 @@ export default function MockExamsPage() {
                               </div>
                             ))}
                           </div>
+                        </td>
+                        <td className="py-4 pr-3">
+                          {r.attachments?.length ? <details><summary className="cursor-pointer text-sm text-indigo-600">{r.attachments.length} 张图片</summary><div className="mt-2 grid grid-cols-2 gap-2">{r.attachments.map((attachment) => <a key={attachment.id} href={attachment.dataUrl} target="_blank" rel="noreferrer"><img src={attachment.dataUrl} alt={attachment.name} className="h-20 w-24 rounded border border-stone-200 object-cover" /></a>)}</div></details> : <span className="text-stone-400">-</span>}
                         </td>
                       </tr>
                     ))}

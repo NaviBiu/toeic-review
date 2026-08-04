@@ -4,6 +4,8 @@ export type PracticeType = 'full_mock' | 'part_drill';
 export type PartScore = { part: 1 | 2 | 3 | 4; correct: number; total: number };
 export type LegacyPartScore = { correct: number; total: number };
 export type ScenarioScore = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
+export type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
+export type PracticeAttachmentInput = { name: string; mimeType: string; dataUrl: string };
 
 type LegacyMockExamInput = {
   testDate: string;
@@ -22,6 +24,7 @@ export type PracticeSessionInput = {
   notes?: string | null;
   parts?: PartScore[];
   scenarios?: ScenarioScore[];
+  attachments?: PracticeAttachmentInput[];
 } & Partial<LegacyMockExamInput>;
 
 export type PracticeSessionResult = {
@@ -37,6 +40,7 @@ export type PracticeSessionResult = {
   part3: LegacyPartScore | null;
   part4: LegacyPartScore | null;
   scenarios: ScenarioScore[];
+  attachments: PracticeAttachment[];
 };
 
 function validateScore(label: string, score: { correct: number; total: number }) {
@@ -73,12 +77,21 @@ function validateParts(parts: PartScore[]) {
   }
 }
 
+function validateAttachments(attachments: PracticeAttachmentInput[]) {
+  if (attachments.length > 5) throw new Error('最多上传 5 张错题图片');
+  for (const attachment of attachments) {
+    if (!attachment.mimeType.startsWith('image/')) throw new Error('错题附件只能是图片');
+    if (!attachment.dataUrl.startsWith(`data:${attachment.mimeType};base64,`)) throw new Error('错题图片格式不正确');
+    if (attachment.dataUrl.length > 3_500_000) throw new Error('单张错题图片不能超过约 2.5 MB');
+  }
+}
+
 function rowPart(result: PracticeSessionResult, part: 1 | 2 | 3 | 4): LegacyPartScore | null {
   const score = result.parts.find((p) => p.part === part);
   return score ? { correct: score.correct, total: score.total } : null;
 }
 
-function buildResult(row: any, parts: PartScore[], scenarios: ScenarioScore[]): PracticeSessionResult {
+function buildResult(row: any, parts: PartScore[], scenarios: ScenarioScore[], attachments: PracticeAttachment[]): PracticeSessionResult {
   const result: PracticeSessionResult = {
     id: row.id,
     practiceDate: row.practice_date,
@@ -92,6 +105,7 @@ function buildResult(row: any, parts: PartScore[], scenarios: ScenarioScore[]): 
     part3: null,
     part4: null,
     scenarios,
+    attachments,
   };
   result.part1 = rowPart(result, 1);
   result.part2 = rowPart(result, 2);
@@ -111,6 +125,8 @@ export async function createMockExam(
   validateParts(parts);
   const scenarios = input.scenarios ?? [];
   scenarios.forEach((s, i) => validateScore(`scenario[${i}]`, s));
+  const attachments = input.attachments ?? [];
+  validateAttachments(attachments);
 
   const type: PracticeType = input.type ?? (parts.length === 4 ? 'full_mock' : 'part_drill');
   if (type === 'full_mock' && parts.length !== 4) {
@@ -146,7 +162,15 @@ export async function createMockExam(
     );
   }
 
-  return buildResult(row, parts, scenarios);
+  for (const attachment of attachments) {
+    await client.query(
+      `INSERT INTO practice_session_attachments (practice_session_id, name, mime_type, data_url)
+       VALUES ($1, $2, $3, $4)`,
+      [row.id, attachment.name, attachment.mimeType, attachment.dataUrl],
+    );
+  }
+
+  return buildResult(row, parts, scenarios, attachments.map((attachment, index) => ({ ...attachment, id: index })));
 }
 
 export async function listMockExams(client: VercelClient): Promise<PracticeSessionResult[]> {
@@ -161,6 +185,10 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
       'SELECT scenario_major, scenario_minor, correct, total FROM practice_scenario_scores WHERE practice_session_id = $1',
       [row.id],
     );
+    const { rows: attachmentRows } = await client.query(
+      'SELECT id, name, mime_type, data_url FROM practice_session_attachments WHERE practice_session_id = $1 ORDER BY id',
+      [row.id],
+    );
     results.push(buildResult(
       row,
       partRows.map((p: any) => ({ part: p.part, correct: p.correct, total: p.total })),
@@ -170,6 +198,7 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
         correct: s.correct,
         total: s.total,
       })),
+      attachmentRows.map((a: any) => ({ id: a.id, name: a.name, mimeType: a.mime_type, dataUrl: a.data_url })),
     ));
   }
   return results;
