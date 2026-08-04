@@ -154,6 +154,10 @@ export default function MockExamsPage() {
   const [parts, setParts] = useState<PartScore[]>(defaultParts('full_mock'));
   const [scenarios, setScenarios] = useState<ScenarioRow[]>([]);
   const [attachments, setAttachments] = useState<PracticeAttachment[]>([]);
+  const [editingRecord, setEditingRecord] = useState<PracticeRecord | null>(null);
+  const [editingAttachments, setEditingAttachments] = useState<PracticeAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState('');
+  const [savingAttachments, setSavingAttachments] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
@@ -216,6 +220,58 @@ export default function MockExamsPage() {
 
   function removeAttachment(index: number) {
     setAttachments((current) => current.filter((_, i) => i !== index));
+  }
+
+  function openAttachmentEditor(record: PracticeRecord) {
+    setEditingRecord(record);
+    setEditingAttachments(record.attachments ?? []);
+    setAttachmentError('');
+  }
+
+  async function handleEditAttachmentChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (editingAttachments.length + files.length > 5) { setAttachmentError('每条成绩最多保存 5 张错题图片'); return; }
+    if (files.some((file) => !file.type.startsWith('image/'))) { setAttachmentError('错题附件只能是图片'); return; }
+    const existingBytes = editingAttachments.reduce((sum, item) => sum + Math.ceil(item.dataUrl.length * 0.75), 0);
+    if (existingBytes + files.reduce((sum, file) => sum + file.size, 0) > 3_000_000) { setAttachmentError('错题图片合计不能超过约 3 MB'); return; }
+    try {
+      const next = await Promise.all(files.map((file) => new Promise<PracticeAttachment>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ id: 0, name: file.name, mimeType: file.type, dataUrl: String(reader.result) });
+        reader.onerror = () => reject(new Error('图片读取失败'));
+        reader.readAsDataURL(file);
+      })));
+      setEditingAttachments((current) => [...current, ...next]);
+      setAttachmentError('');
+      e.target.value = '';
+    } catch (err: any) {
+      setAttachmentError(err.message ?? '图片读取失败');
+    }
+  }
+
+  async function saveEditedAttachments() {
+    if (!editingRecord) return;
+    setSavingAttachments(true);
+    setAttachmentError('');
+    try {
+      const res = await fetch(`/api/mock-exams/${editingRecord.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attachments: editingAttachments.map(({ name, mimeType, dataUrl }) => ({ name, mimeType, dataUrl })),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setAttachmentError(body.error ?? '保存图片失败，请重试'); return; }
+      setHistory((current) => current.map((record) => (
+        record.id === editingRecord.id ? { ...record, attachments: body.attachments } : record
+      )));
+      setEditingRecord(null);
+    } catch {
+      setAttachmentError('网络错误，图片尚未保存');
+    } finally {
+      setSavingAttachments(false);
+    }
   }
 
   function changeType(type: PracticeType) {
@@ -435,6 +491,40 @@ export default function MockExamsPage() {
           </form>
         </Modal>
 
+        <Modal open={editingRecord !== null} onClose={() => setEditingRecord(null)} title="管理错题图片">
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+              <span className="font-medium text-stone-800">{editingRecord?.practiceDate}</span>
+              {editingRecord?.title ? <span className="ml-2">{editingRecord.title}</span> : null}
+            </div>
+
+            {editingAttachments.length > 0 ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {editingAttachments.map((attachment, index) => (
+                  <div key={`${attachment.id}-${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-white">
+                    <a href={attachment.dataUrl} target="_blank" rel="noreferrer"><img src={attachment.dataUrl} alt={attachment.name} className="h-28 w-full object-cover" /></a>
+                    <button type="button" onClick={() => setEditingAttachments((current) => current.filter((_, i) => i !== index))} title="移除这张图片" aria-label="移除这张图片" className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-sm text-red-600 shadow-sm">×</button>
+                    <p className="truncate px-2 py-1.5 text-xs text-stone-500">{attachment.name}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-400">这条成绩还没有错题图片</div>
+            )}
+
+            <label className="block">
+              <span className="mb-2 block text-xs font-medium text-stone-500">追加图片</span>
+              <input type="file" accept="image/*" multiple onChange={handleEditAttachmentChange} className="block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600" />
+            </label>
+            <p className="text-xs text-stone-400">每条成绩最多 5 张，合计不超过约 3 MB。</p>
+            {attachmentError ? <p className="text-sm text-red-600">{attachmentError}</p> : null}
+            <div className="flex justify-end gap-2 border-t border-stone-200 pt-4">
+              <button type="button" onClick={() => setEditingRecord(null)} className="rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 hover:bg-stone-50">取消</button>
+              <button type="button" onClick={saveEditedAttachments} disabled={savingAttachments} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">{savingAttachments ? '保存中…' : '保存图片'}</button>
+            </div>
+          </div>
+        </Modal>
+
         <div className="mb-6 flex rounded-xl border border-stone-200 bg-white p-1 shadow-sm">
           {([
             ['analysis', '分析'],
@@ -524,7 +614,7 @@ export default function MockExamsPage() {
                           </div>
                         </td>
                         <td className="py-4 pr-3">
-                          {r.attachments?.length ? <details><summary className="cursor-pointer text-sm text-indigo-600">{r.attachments.length} 张图片</summary><div className="mt-2 grid grid-cols-2 gap-2">{r.attachments.map((attachment) => <a key={attachment.id} href={attachment.dataUrl} target="_blank" rel="noreferrer"><img src={attachment.dataUrl} alt={attachment.name} className="h-20 w-24 rounded border border-stone-200 object-cover" /></a>)}</div></details> : <span className="text-stone-400">-</span>}
+                          <button type="button" onClick={() => openAttachmentEditor(r)} className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50">管理图片{r.attachments?.length ? ` (${r.attachments.length})` : ''}</button>
                         </td>
                       </tr>
                     ))}

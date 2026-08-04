@@ -173,6 +173,29 @@ export async function createMockExam(
   return buildResult(row, parts, scenarios, attachments.map((attachment, index) => ({ ...attachment, id: index })));
 }
 
+export async function replacePracticeAttachments(
+  client: VercelClient,
+  practiceSessionId: number,
+  attachments: PracticeAttachmentInput[],
+): Promise<PracticeAttachment[]> {
+  validateAttachments(attachments);
+  const { rows: sessions } = await client.query('SELECT id FROM practice_sessions WHERE id = $1', [practiceSessionId]);
+  if (sessions.length === 0) throw new Error('练习记录不存在');
+
+  await client.query('DELETE FROM practice_session_attachments WHERE practice_session_id = $1', [practiceSessionId]);
+  const saved: PracticeAttachment[] = [];
+  for (const attachment of attachments) {
+    const { rows } = await client.query(
+      `INSERT INTO practice_session_attachments (practice_session_id, name, mime_type, data_url)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, mime_type, data_url`,
+      [practiceSessionId, attachment.name, attachment.mimeType, attachment.dataUrl],
+    );
+    saved.push({ id: rows[0].id, name: rows[0].name, mimeType: rows[0].mime_type, dataUrl: rows[0].data_url });
+  }
+  return saved;
+}
+
 export async function listMockExams(client: VercelClient): Promise<PracticeSessionResult[]> {
   const { rows } = await client.query('SELECT * FROM practice_sessions ORDER BY practice_date DESC, id DESC');
   const results: PracticeSessionResult[] = [];

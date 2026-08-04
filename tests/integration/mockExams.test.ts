@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { withTestClient } from './setup';
-import { createMockExam, listMockExams } from '../../src/lib/mockExams';
+import { createMockExam, listMockExams, replacePracticeAttachments } from '../../src/lib/mockExams';
 
 const VALID = {
   practiceDate: '2026-06-26',
@@ -96,6 +96,31 @@ describe('listMockExams', () => {
       expect(index0601).toBeGreaterThan(-1);
       expect(index0620).toBeGreaterThan(-1);
       expect(index0620).toBeLessThan(index0601);
+    });
+  }, 30000);
+});
+
+describe('replacePracticeAttachments', () => {
+  it('replaces attachments on an existing practice record without changing its scores', async () => {
+    await withTestClient(async (client) => {
+      const created = await createMockExam(client, { ...VALID, scenarios: [] });
+      await replacePracticeAttachments(client, created.id, [{
+        name: 'wrong-questions.png',
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,dGVzdA==',
+      }]);
+
+      const { rows: attachments } = await client.query(
+        'SELECT name, mime_type FROM practice_session_attachments WHERE practice_session_id = $1',
+        [created.id],
+      );
+      const { rows: scores } = await client.query(
+        'SELECT count(*)::int AS count FROM practice_part_scores WHERE practice_session_id = $1',
+        [created.id],
+      );
+
+      expect(attachments).toEqual([{ name: 'wrong-questions.png', mime_type: 'image/png' }]);
+      expect(scores[0].count).toBe(4);
     });
   }, 30000);
 });
