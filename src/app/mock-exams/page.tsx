@@ -5,6 +5,7 @@ import Header from '@/components/Header';
 import Modal from '@/components/Modal';
 import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 import AccuracyBadge from '@/components/AccuracyBadge';
+import { formatPracticeSource } from '@/lib/practiceRecordView';
 import {
   LISTENING_800_TARGETS,
   buildPartDiagnostics,
@@ -145,6 +146,58 @@ function PartDiagnosticChart({ diagnostic }: { diagnostic: PartDiagnostic }) {
   );
 }
 
+function PracticeRecordListItem({
+  record,
+  onPreview,
+  onManage,
+}: {
+  record: PracticeRecord;
+  onPreview: (attachment: PracticeAttachment) => void;
+  onManage: (record: PracticeRecord) => void;
+}) {
+  const source = formatPracticeSource(record.title);
+  const firstAttachment = record.attachments?.[0];
+
+  return (
+    <article className="grid gap-5 border-b border-stone-200 px-5 py-5 last:border-b-0 md:grid-cols-[112px_minmax(180px,1fr)_minmax(250px,1.2fr)_150px] md:items-center md:px-6">
+      <div>
+        <p className="text-xs font-medium text-stone-400">练习日期</p>
+        <time className="mt-1 block whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-stone-800">{record.practiceDate}</time>
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-stone-900">{typeLabel(record.type)}</p>
+        {source.label ? (
+          source.href ? <a href={source.href} target="_blank" rel="noreferrer" className="mt-1 inline-flex max-w-full items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 hover:underline">{source.label}<span aria-hidden="true">↗</span></a>
+            : <p className="mt-1 truncate text-sm text-stone-500" title={source.label}>{source.label}</p>
+        ) : <p className="mt-1 text-sm text-stone-400">未填写来源</p>}
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium text-stone-400">Part 成绩</p>
+        <div className="grid grid-cols-2 gap-2">
+          {record.parts.map((part) => (
+            <div key={part.part} className="flex min-h-9 items-center justify-between gap-2 rounded-md bg-stone-100 px-3 py-1.5 text-sm text-stone-700">
+              <span className="whitespace-nowrap font-medium">P{part.part} {part.correct}/{part.total}</span>
+              <AccuracyBadge ratio={ratioOf(part.correct, part.total)} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 md:justify-end">
+        {firstAttachment ? (
+          <button type="button" onClick={() => onPreview(firstAttachment)} title="查看错题图片" className="relative h-16 w-20 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-stone-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+            <img src={firstAttachment.dataUrl} alt={firstAttachment.name} className="h-full w-full object-cover" />
+            {record.attachments.length > 1 ? <span className="absolute bottom-1 right-1 rounded bg-stone-950/75 px-1.5 py-0.5 text-[10px] font-medium text-white">+{record.attachments.length - 1}</span> : null}
+          </button>
+        ) : null}
+        <button type="button" onClick={() => onManage(record)} className="whitespace-nowrap rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:border-indigo-300 hover:text-indigo-700">{firstAttachment ? '管理图片' : '添加图片'}</button>
+      </div>
+    </article>
+  );
+}
+
 export default function MockExamsPage() {
   const [history, setHistory] = useState<PracticeRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -156,6 +209,7 @@ export default function MockExamsPage() {
   const [attachments, setAttachments] = useState<PracticeAttachment[]>([]);
   const [editingRecord, setEditingRecord] = useState<PracticeRecord | null>(null);
   const [editingAttachments, setEditingAttachments] = useState<PracticeAttachment[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<PracticeAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
   const [savingAttachments, setSavingAttachments] = useState(false);
   const [error, setError] = useState('');
@@ -344,7 +398,7 @@ export default function MockExamsPage() {
   return (
     <main className="min-h-screen bg-stone-50">
       <Header />
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">练习记录</h1>
           <button
@@ -476,7 +530,7 @@ export default function MockExamsPage() {
             <div>
               <p className="mb-2 text-xs font-medium text-stone-400">错题图片（可选）</p>
               <input type="file" accept="image/*" multiple onChange={handleAttachmentChange} className="block w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600" />
-              {attachments.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-stone-50"><img src={attachment.dataUrl} alt={attachment.name} className="h-24 w-full object-cover" /><button type="button" onClick={() => removeAttachment(index)} className="absolute right-1 top-1 rounded-full bg-white/90 px-2 py-0.5 text-xs text-red-600 shadow-sm">×</button><p className="truncate px-2 py-1 text-xs text-stone-500">{attachment.name}</p></div>)}</div>}
+              {attachments.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-stone-50"><button type="button" onClick={() => setPreviewAttachment(attachment)} title="查看大图" className="block w-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"><img src={attachment.dataUrl} alt={attachment.name} className="h-24 w-full object-cover" /></button><button type="button" onClick={() => removeAttachment(index)} className="absolute right-1 top-1 rounded-full bg-white/90 px-2 py-0.5 text-xs text-red-600 shadow-sm">×</button><p className="truncate px-2 py-1 text-xs text-stone-500">{attachment.name}</p></div>)}</div>}
               <p className="mt-2 text-xs text-stone-400">支持多张图片，合计不超过约 3 MB。</p>
             </div>
 
@@ -502,7 +556,7 @@ export default function MockExamsPage() {
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {editingAttachments.map((attachment, index) => (
                   <div key={`${attachment.id}-${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-white">
-                    <a href={attachment.dataUrl} target="_blank" rel="noreferrer"><img src={attachment.dataUrl} alt={attachment.name} className="h-28 w-full object-cover" /></a>
+                    <button type="button" onClick={() => setPreviewAttachment(attachment)} title="查看大图" className="block w-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"><img src={attachment.dataUrl} alt={attachment.name} className="h-28 w-full object-cover" /></button>
                     <button type="button" onClick={() => setEditingAttachments((current) => current.filter((_, i) => i !== index))} title="移除这张图片" aria-label="移除这张图片" className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-sm text-red-600 shadow-sm">×</button>
                     <p className="truncate px-2 py-1.5 text-xs text-stone-500">{attachment.name}</p>
                   </div>
@@ -525,7 +579,17 @@ export default function MockExamsPage() {
           </div>
         </Modal>
 
-        <div className="mb-6 flex rounded-xl border border-stone-200 bg-white p-1 shadow-sm">
+        {previewAttachment ? (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-950/80 p-4" onClick={() => setPreviewAttachment(null)}>
+            <div className="relative flex max-h-[94vh] max-w-[94vw] flex-col" onClick={(e) => e.stopPropagation()}>
+              <button type="button" onClick={() => setPreviewAttachment(null)} title="关闭图片" aria-label="关闭图片" className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-xl text-stone-700 shadow-md hover:bg-white">×</button>
+              <img src={previewAttachment.dataUrl} alt={previewAttachment.name} className="max-h-[88vh] max-w-[92vw] rounded-md bg-white object-contain shadow-2xl" />
+              <p className="mt-2 truncate text-center text-sm text-white/80">{previewAttachment.name}</p>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mb-8 inline-flex w-full rounded-lg border border-stone-200 bg-white p-1 sm:w-auto">
           {([
             ['analysis', '分析'],
             ['records', '记录'],
@@ -535,7 +599,7 @@ export default function MockExamsPage() {
               type="button"
               onClick={() => setTab(value)}
               className={
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium ' +
+                'min-w-28 flex-1 rounded-md px-4 py-2 text-sm font-medium sm:flex-none ' +
                 (tab === value ? 'bg-stone-900 text-white' : 'text-stone-500 hover:bg-stone-50')
               }
             >
@@ -579,47 +643,17 @@ export default function MockExamsPage() {
           )
         ) : (
           <>
-            <h2 className="mb-3 text-lg font-semibold text-stone-900">练习历史</h2>
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div><h2 className="text-lg font-semibold text-stone-900">练习历史</h2><p className="mt-1 text-sm text-stone-500">成绩、来源和错题图片集中在同一条记录中。</p></div>
+              <span className="text-xs font-medium text-stone-400">共 {history.length} 条</span>
+            </div>
             {history.length === 0 && !historyError ? (
               <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
                 还没有练习记录
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-                <table className="w-full text-sm">
-                  <thead className="bg-stone-50 text-xs font-medium text-stone-500">
-                    <tr>
-                      <th className="px-4 py-3.5 text-left">日期</th>
-                      <th className="py-3.5 text-left">类型</th>
-                      <th className="py-3.5 text-left">Part 成绩</th>
-                      <th className="py-3.5 text-left">错题图片</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageHistory.map((r, idx) => (
-                      <tr key={r.id} className={idx % 2 === 1 ? 'bg-stone-50/60' : ''}>
-                        <td className="px-4 py-4 text-stone-700">{r.practiceDate}</td>
-                        <td className="py-4 text-stone-600">
-                          <div>{typeLabel(r.type)}</div>
-                          {r.title && <div className="mt-1 text-xs text-stone-400">{r.title}</div>}
-                        </td>
-                        <td className="py-4">
-                          <div className="flex flex-wrap gap-2">
-                            {r.parts.map((part) => (
-                              <div key={part.part} className="flex items-center gap-1 rounded-lg bg-stone-50 px-2 py-1 text-xs text-stone-600">
-                                P{part.part} {part.correct}/{part.total}
-                                <AccuracyBadge ratio={ratioOf(part.correct, part.total)} />
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="py-4 pr-3">
-                          <button type="button" onClick={() => openAttachmentEditor(r)} className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50">管理图片{r.attachments?.length ? ` (${r.attachments.length})` : ''}</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+                {pageHistory.map((record) => <PracticeRecordListItem key={record.id} record={record} onPreview={setPreviewAttachment} onManage={openAttachmentEditor} />)}
               </div>
             )}
             <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
