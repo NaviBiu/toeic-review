@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { SCENARIOS } from '@/lib/scenarios';
 import Header from '@/components/Header';
+import ReviewItemActions from '@/components/ReviewItemActions';
 import { useWorkMode } from '@/hooks/useWorkMode';
 import { workReviewCopy } from '@/lib/disguiseMode';
 
@@ -281,10 +282,12 @@ export default function ReviewPage() {
                     ) : (
                       <div className="mt-6 border-t border-slate-200 pt-5"><p className="font-mono text-sm text-slate-600">Decision recorded for this reference. Continue when ready to review the next item.</p><div className="mt-5 border-y border-slate-200 py-4"><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-700">Reference analysis</p><p className="mt-3 text-sm leading-6 text-slate-700">{current.meaning}</p><p className="mt-3 text-xs leading-5 text-slate-500">{current.notes || 'No additional analysis recorded.'}</p></div><div className="mt-5 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><span className={'rounded-full px-3 py-1 font-mono text-xs ' + (guess === 'remember' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800')}>{guess === 'remember' ? workReviewCopy.confirmed : workReviewCopy.followUp}</span><button onClick={revoke} title={workReviewCopy.revert} aria-label={workReviewCopy.revert} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900">↩</button></div><button onClick={next} className="border border-slate-700 bg-slate-700 px-4 py-2 font-mono text-sm text-white hover:bg-slate-800">{workReviewCopy.continue}</button></div></div>
                     )}
-                    <div className="mt-5 flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
-                      <button onClick={handleMastered} className="border border-emerald-700 px-3 py-2 font-mono text-xs text-emerald-800 hover:bg-emerald-50">Mastered</button>
-                      <button onClick={handleDelete} title="Remove from review" aria-label="Remove from review" className="rounded-full p-2 text-slate-500 hover:bg-red-50 hover:text-red-700">🗑</button>
-                    </div>
+                    <ReviewItemActions
+                      mode="work"
+                      onMastered={handleMastered}
+                      onDelete={handleDelete}
+                      className="mt-5 justify-end border-t border-slate-200 pt-4"
+                    />
                   </div>
                 </section>
               )}
@@ -426,14 +429,12 @@ export default function ReviewPage() {
                 </>
               )}
             </div>
-            <button onClick={handleMastered} className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100">已掌握</button>
-            <button
-              onClick={handleDelete}
-              title="删除(不需要再复习)"
-              className="mt-4 rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-red-600"
-            >
-              🗑️
-            </button>
+            <ReviewItemActions
+              mode="study"
+              onMastered={handleMastered}
+              onDelete={handleDelete}
+              className="mt-3 justify-end"
+            />
           </>
         )}
       </div>

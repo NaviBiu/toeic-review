@@ -39,6 +39,7 @@ export const workReviewCopy = {
   yourDecision: 'Decision',
   revert: 'Revert decision',
   continue: 'Continue',
+  mastered: 'Mark as mastered',
   delete: 'Remove from review',
   deleted: 'Item removed.',
   restore: 'Restore',

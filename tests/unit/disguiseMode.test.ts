@@ -34,5 +34,6 @@ describe('disguise mode labels', () => {
     expect(workReviewCopy.pending(14)).toBe('14 items pending');
     expect(workReviewCopy.confirmed).toBe('Confirmed');
     expect(workReviewCopy.followUp).toBe('Needs follow-up');
+    expect(workReviewCopy.mastered).toBe('Mark as mastered');
   });
 });
