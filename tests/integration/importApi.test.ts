@@ -37,6 +37,21 @@ afterEach(async () => {
 });
 
 describe('POST /api/knowledge-points/import', () => {
+  it('returns an actionable message when the Anthropic organization is disabled', async () => {
+    vi.mocked(parseImportDocument).mockRejectedValueOnce(
+      Object.assign(new Error('This organization has been disabled.'), { status: 400 }),
+    );
+    const form = new FormData();
+    form.append('file', new File(['hello'], 'notes.docx'));
+    const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
+
+    const res = await importRoute(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(body.error).toBe('Claude API 组织已被停用，请登录 Anthropic Console 检查账户状态');
+  });
+
   it('returns an actionable message when the Claude API credit balance is exhausted', async () => {
     vi.mocked(parseImportDocument).mockRejectedValueOnce(
       Object.assign(new Error('Your credit balance is too low to access the Anthropic API'), { status: 400 }),

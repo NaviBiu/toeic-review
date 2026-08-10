@@ -27,7 +27,9 @@ function getAiFailureDetails(err: unknown): {
   const normalizedMessage = message.toLowerCase();
 
   let userMessage = 'AI 解析失败，请稍后重试';
-  if (
+  if (/organization (?:has been )?disabled|account (?:has been )?disabled/.test(normalizedMessage)) {
+    userMessage = 'Claude API 组织已被停用，请登录 Anthropic Console 检查账户状态';
+  } else if (
     status === 402
     || /credit balance|insufficient credit|billing|payment required/.test(normalizedMessage)
   ) {
