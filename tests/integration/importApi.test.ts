@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { sql } from '../../src/lib/db';
 
 vi.mock('@/lib/importParser', () => ({
+  TruncatedAiResponseError: class TruncatedAiResponseError extends Error {},
   parseImportDocument: vi.fn(async () => [{
     term: 'zztest-workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
     dateAdded: '2026-06-23', scenarioMajor: '一般商务', scenarioMinor: '会议',
@@ -24,6 +25,7 @@ vi.mock('@/lib/fileExtract', async () => {
 
 const { POST: importRoute } = await import('../../src/app/api/knowledge-points/import/route');
 const { POST: confirmRoute } = await import('../../src/app/api/knowledge-points/import/confirm/route');
+const { parseImportDocument } = await import('../../src/lib/importParser');
 const { NextRequest } = await import('next/server');
 
 let createdIds: number[] = [];
@@ -35,6 +37,21 @@ afterEach(async () => {
 });
 
 describe('POST /api/knowledge-points/import', () => {
+  it('returns an actionable message when the Claude API credit balance is exhausted', async () => {
+    vi.mocked(parseImportDocument).mockRejectedValueOnce(
+      Object.assign(new Error('Your credit balance is too low to access the Anthropic API'), { status: 400 }),
+    );
+    const form = new FormData();
+    form.append('file', new File(['hello'], 'notes.docx'));
+    const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
+
+    const res = await importRoute(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(body.error).toBe('Claude API 余额不足或计费状态异常，请充值后再试');
+  });
+
   it('rejects an unsupported file extension before the parser ever runs', async () => {
     const form = new FormData();
     form.append('file', new File(['hello'], 'notes.txt'));

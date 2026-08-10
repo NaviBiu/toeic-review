@@ -16,6 +16,33 @@ import { todayInShanghai, isFutureDate } from '@/lib/dateUtils';
 // harmless, Vercel clamps it.
 export const maxDuration = 300;
 
+function getAiFailureDetails(err: unknown): {
+  userMessage: string;
+  log: { name: string; status: number | null; message: string };
+} {
+  const error = err as { name?: unknown; status?: unknown; message?: unknown };
+  const name = typeof error?.name === 'string' ? error.name : 'UnknownError';
+  const status = typeof error?.status === 'number' ? error.status : null;
+  const message = typeof error?.message === 'string' ? error.message.slice(0, 500) : String(err).slice(0, 500);
+  const normalizedMessage = message.toLowerCase();
+
+  let userMessage = 'AI 解析失败，请稍后重试';
+  if (
+    status === 402
+    || /credit balance|insufficient credit|billing|payment required/.test(normalizedMessage)
+  ) {
+    userMessage = 'Claude API 余额不足或计费状态异常，请充值后再试';
+  } else if (status === 401 || status === 403) {
+    userMessage = 'Claude API 密钥无效或权限不足，请更新密钥后再试';
+  } else if (status === 429) {
+    userMessage = 'Claude API 请求过于频繁，请稍后再试';
+  } else if (status != null && status >= 500) {
+    userMessage = 'Claude API 服务暂时不可用，请稍后再试';
+  }
+
+  return { userMessage, log: { name, status, message } };
+}
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File | null;
@@ -44,7 +71,9 @@ export async function POST(req: NextRequest) {
     if (err instanceof TruncatedAiResponseError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
-    return NextResponse.json({ error: '解析失败,请重试' }, { status: 502 });
+    const failure = getAiFailureDetails(err);
+    console.error('AI import parsing failed', failure.log);
+    return NextResponse.json({ error: failure.userMessage }, { status: 502 });
   }
 
   const client = createClient();
