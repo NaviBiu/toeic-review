@@ -23,6 +23,8 @@ vi.mock('@/lib/fileExtract', async () => {
   };
 });
 
+vi.stubEnv('OPENAI_API_KEY', 'test-key');
+
 const { POST: importRoute } = await import('../../src/app/api/knowledge-points/import/route');
 const { POST: confirmRoute } = await import('../../src/app/api/knowledge-points/import/confirm/route');
 const { parseImportDocument } = await import('../../src/lib/importParser');
@@ -37,24 +39,26 @@ afterEach(async () => {
 });
 
 describe('POST /api/knowledge-points/import', () => {
-  it('returns an actionable message when the Anthropic organization is disabled', async () => {
-    vi.mocked(parseImportDocument).mockRejectedValueOnce(
-      Object.assign(new Error('This organization has been disabled.'), { status: 400 }),
-    );
-    const form = new FormData();
-    form.append('file', new File(['hello'], 'notes.docx'));
-    const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
+  it('explains that OPENAI_API_KEY is missing before any API request is attempted', async () => {
+    vi.stubEnv('OPENAI_API_KEY', '');
+    try {
+      const form = new FormData();
+      form.append('file', new File(['hello'], 'notes.docx'));
+      const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
 
-    const res = await importRoute(req);
-    const body = await res.json();
+      const res = await importRoute(req);
+      const body = await res.json();
 
-    expect(res.status).toBe(502);
-    expect(body.error).toBe('Claude API 组织已被停用，请登录 Anthropic Console 检查账户状态');
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('OpenAI API 尚未配置，请先设置 OPENAI_API_KEY');
+    } finally {
+      vi.stubEnv('OPENAI_API_KEY', 'test-key');
+    }
   });
 
-  it('returns an actionable message when the Claude API credit balance is exhausted', async () => {
+  it('returns an actionable message when the OpenAI API key is invalid', async () => {
     vi.mocked(parseImportDocument).mockRejectedValueOnce(
-      Object.assign(new Error('Your credit balance is too low to access the Anthropic API'), { status: 400 }),
+      Object.assign(new Error('Incorrect API key provided'), { status: 401 }),
     );
     const form = new FormData();
     form.append('file', new File(['hello'], 'notes.docx'));
@@ -64,7 +68,22 @@ describe('POST /api/knowledge-points/import', () => {
     const body = await res.json();
 
     expect(res.status).toBe(502);
-    expect(body.error).toBe('Claude API 余额不足或计费状态异常，请充值后再试');
+    expect(body.error).toBe('OpenAI API 密钥无效或权限不足，请更新密钥后重试');
+  });
+
+  it('returns an actionable message when the OpenAI API quota is exhausted', async () => {
+    vi.mocked(parseImportDocument).mockRejectedValueOnce(
+      Object.assign(new Error('You exceeded your current quota'), { status: 429, code: 'insufficient_quota' }),
+    );
+    const form = new FormData();
+    form.append('file', new File(['hello'], 'notes.docx'));
+    const req = new NextRequest(new Request('http://localhost/api/knowledge-points/import', { method: 'POST', body: form }));
+
+    const res = await importRoute(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(body.error).toBe('OpenAI API 余额不足或已达到使用限额，请检查计费和用量设置');
   });
 
   it('rejects an unsupported file extension before the parser ever runs', async () => {

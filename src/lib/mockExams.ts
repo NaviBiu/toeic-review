@@ -1,11 +1,37 @@
 import type { VercelClient } from '@vercel/postgres';
 
 export type PracticeType = 'full_mock' | 'part_drill';
-export type PartScore = { part: 1 | 2 | 3 | 4; correct: number; total: number };
+export type PracticeSection = 'listening' | 'reading';
+export type PartNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type PartScore = { part: PartNumber; correct: number; total: number };
 export type LegacyPartScore = { correct: number; total: number };
 export type ScenarioScore = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
 export type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
 export type PracticeAttachmentInput = { name: string; mimeType: string; dataUrl: string };
+
+type PracticeSessionRow = {
+  id: number;
+  practice_date: string;
+  section?: PracticeSection;
+  type: PracticeType;
+  title: string | null;
+  notes: string | null;
+};
+type PartScoreRow = { practice_session_id: number; part: PartNumber; correct: number; total: number };
+type ScenarioScoreRow = {
+  practice_session_id: number;
+  scenario_major: string;
+  scenario_minor: string;
+  correct: number;
+  total: number;
+};
+type PracticeAttachmentRow = {
+  id: number;
+  practice_session_id: number;
+  name: string;
+  mime_type: string;
+  data_url: string;
+};
 
 type LegacyMockExamInput = {
   testDate: string;
@@ -19,6 +45,7 @@ type LegacyMockExamInput = {
 export type PracticeSessionInput = {
   practiceDate?: string;
   testDate?: string;
+  section?: PracticeSection;
   type?: PracticeType;
   title?: string | null;
   notes?: string | null;
@@ -31,6 +58,7 @@ export type PracticeSessionResult = {
   id: number;
   practiceDate: string;
   testDate: string;
+  section: PracticeSection;
   type: PracticeType;
   title: string | null;
   notes: string | null;
@@ -66,11 +94,23 @@ function normalizeParts(input: PracticeSessionInput): PartScore[] {
     .map(([part, score]) => ({ part, correct: score!.correct, total: score!.total }));
 }
 
-function validateParts(parts: PartScore[]) {
+const SECTION_PARTS: Record<PracticeSection, PartNumber[]> = {
+  listening: [1, 2, 3, 4],
+  reading: [5, 6, 7],
+};
+
+function inferSection(parts: PartScore[]): PracticeSection {
+  return parts.length > 0 && parts.every((score) => score.part >= 5) ? 'reading' : 'listening';
+}
+
+function validateParts(parts: PartScore[], section: PracticeSection) {
   if (parts.length < 1) throw new Error('至少记录一个 Part 的成绩');
+  const allowedParts = SECTION_PARTS[section];
   const seen = new Set<number>();
   for (const score of parts) {
-    if (![1, 2, 3, 4].includes(score.part)) throw new Error('Part 只能是 1 到 4');
+    if (!allowedParts.includes(score.part)) {
+      throw new Error(section === 'reading' ? '阅读练习只能记录 Part 5-7' : '听力练习只能记录 Part 1-4');
+    }
     if (seen.has(score.part)) throw new Error(`Part ${score.part}: 不能重复记录`);
     seen.add(score.part);
     validateScore(`part${score.part}`, score);
@@ -91,11 +131,17 @@ function rowPart(result: PracticeSessionResult, part: 1 | 2 | 3 | 4): LegacyPart
   return score ? { correct: score.correct, total: score.total } : null;
 }
 
-function buildResult(row: any, parts: PartScore[], scenarios: ScenarioScore[], attachments: PracticeAttachment[]): PracticeSessionResult {
+function buildResult(
+  row: PracticeSessionRow,
+  parts: PartScore[],
+  scenarios: ScenarioScore[],
+  attachments: PracticeAttachment[],
+): PracticeSessionResult {
   const result: PracticeSessionResult = {
     id: row.id,
     practiceDate: row.practice_date,
     testDate: row.practice_date,
+    section: row.section ?? 'listening',
     type: row.type,
     title: row.title,
     notes: row.notes,
@@ -122,25 +168,30 @@ export async function createMockExam(
   if (!practiceDate) throw new Error('练习日期必填');
 
   const parts = normalizeParts(input);
-  validateParts(parts);
+  const section = input.section ?? inferSection(parts);
+  validateParts(parts, section);
   const scenarios = input.scenarios ?? [];
   scenarios.forEach((s, i) => validateScore(`scenario[${i}]`, s));
   const attachments = input.attachments ?? [];
   validateAttachments(attachments);
 
-  const type: PracticeType = input.type ?? (parts.length === 4 ? 'full_mock' : 'part_drill');
-  if (type === 'full_mock' && parts.length !== 4) {
-    throw new Error('完整模考需要记录 Part 1-4');
+  const expectedParts = SECTION_PARTS[section];
+  const hasCompleteSection = parts.length === expectedParts.length
+    && expectedParts.every((part) => parts.some((score) => score.part === part));
+  const type: PracticeType = input.type ?? (hasCompleteSection ? 'full_mock' : 'part_drill');
+  if (type === 'full_mock' && !hasCompleteSection) {
+    throw new Error(section === 'reading' ? '完整阅读需要记录 Part 5-7' : '完整模考需要记录 Part 1-4');
   }
 
   const { rows } = await client.query(
-    `INSERT INTO practice_sessions (practice_date, type, title, notes)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO practice_sessions (practice_date, section, type, title, notes)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
     [
       practiceDate,
+      section,
       type,
-      input.title ?? (type === 'full_mock' ? '完整模考' : '专项训练'),
+      input.title ?? (type === 'full_mock' ? (section === 'reading' ? '完整阅读' : '完整模考') : '专项训练'),
       input.notes ?? null,
     ],
   );
@@ -197,32 +248,69 @@ export async function replacePracticeAttachments(
 }
 
 export async function listMockExams(client: VercelClient): Promise<PracticeSessionResult[]> {
-  const { rows } = await client.query('SELECT * FROM practice_sessions ORDER BY practice_date DESC, id DESC');
-  const results: PracticeSessionResult[] = [];
-  for (const row of rows) {
-    const { rows: partRows } = await client.query(
-      'SELECT part, correct, total FROM practice_part_scores WHERE practice_session_id = $1 ORDER BY part',
-      [row.id],
-    );
-    const { rows: scenarioRows } = await client.query(
-      'SELECT scenario_major, scenario_minor, correct, total FROM practice_scenario_scores WHERE practice_session_id = $1',
-      [row.id],
-    );
-    const { rows: attachmentRows } = await client.query(
-      'SELECT id, name, mime_type, data_url FROM practice_session_attachments WHERE practice_session_id = $1 ORDER BY id',
-      [row.id],
-    );
-    results.push(buildResult(
-      row,
-      partRows.map((p: any) => ({ part: p.part, correct: p.correct, total: p.total })),
-      scenarioRows.map((s: any) => ({
-        scenarioMajor: s.scenario_major,
-        scenarioMinor: s.scenario_minor,
-        correct: s.correct,
-        total: s.total,
-      })),
-      attachmentRows.map((a: any) => ({ id: a.id, name: a.name, mimeType: a.mime_type, dataUrl: a.data_url })),
-    ));
+  const { rows } = await client.query<PracticeSessionRow>(
+    'SELECT * FROM practice_sessions ORDER BY practice_date DESC, id DESC',
+  );
+  if (rows.length === 0) return [];
+
+  const sessionIds = rows.map((row) => row.id);
+  const { rows: partRows } = await client.query<PartScoreRow>(
+    `SELECT practice_session_id, part, correct, total
+     FROM practice_part_scores
+     WHERE practice_session_id = ANY($1::int[])
+     ORDER BY practice_session_id, part`,
+    [sessionIds],
+  );
+  const { rows: scenarioRows } = await client.query<ScenarioScoreRow>(
+    `SELECT practice_session_id, scenario_major, scenario_minor, correct, total
+     FROM practice_scenario_scores
+     WHERE practice_session_id = ANY($1::int[])
+     ORDER BY practice_session_id, id`,
+    [sessionIds],
+  );
+  const { rows: attachmentRows } = await client.query<PracticeAttachmentRow>(
+    `SELECT id, practice_session_id, name, mime_type, data_url
+     FROM practice_session_attachments
+     WHERE practice_session_id = ANY($1::int[])
+     ORDER BY practice_session_id, id`,
+    [sessionIds],
+  );
+
+  const partsBySession = new Map<number, PartScore[]>();
+  for (const score of partRows) {
+    const scores = partsBySession.get(score.practice_session_id) ?? [];
+    scores.push({ part: score.part, correct: score.correct, total: score.total });
+    partsBySession.set(score.practice_session_id, scores);
   }
-  return results;
+
+  const scenariosBySession = new Map<number, ScenarioScore[]>();
+  for (const score of scenarioRows) {
+    const scores = scenariosBySession.get(score.practice_session_id) ?? [];
+    scores.push({
+      scenarioMajor: score.scenario_major,
+      scenarioMinor: score.scenario_minor,
+      correct: score.correct,
+      total: score.total,
+    });
+    scenariosBySession.set(score.practice_session_id, scores);
+  }
+
+  const attachmentsBySession = new Map<number, PracticeAttachment[]>();
+  for (const attachment of attachmentRows) {
+    const attachments = attachmentsBySession.get(attachment.practice_session_id) ?? [];
+    attachments.push({
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mime_type,
+      dataUrl: attachment.data_url,
+    });
+    attachmentsBySession.set(attachment.practice_session_id, attachments);
+  }
+
+  return rows.map((row) => buildResult(
+    row,
+    partsBySession.get(row.id) ?? [],
+    scenariosBySession.get(row.id) ?? [],
+    attachmentsBySession.get(row.id) ?? [],
+  ));
 }

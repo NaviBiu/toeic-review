@@ -7,6 +7,15 @@ import Pagination, { PAGE_SIZE } from '@/components/Pagination';
 import AccuracyBadge from '@/components/AccuracyBadge';
 import { formatPracticeSource } from '@/lib/practiceRecordView';
 import {
+  PRACTICE_PART_TOTALS,
+  defaultPracticeParts,
+  filterRecordsBySection,
+  partOptionsForSection,
+  type PracticePartNumber,
+  type PracticePartScore,
+  type PracticeSection,
+} from '@/lib/practiceRecordForm';
+import {
   LISTENING_800_TARGETS,
   buildPartDiagnostics,
   ratioOf,
@@ -15,12 +24,13 @@ import {
 } from '@/lib/practiceAnalytics';
 
 type PracticeType = 'full_mock' | 'part_drill';
-type PartScore = { part: 1 | 2 | 3 | 4; correct: number; total: number };
+type PartScore = PracticePartScore;
 type ScenarioRow = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
 type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
 type PracticeRecord = {
   id: number;
   practiceDate: string;
+  section?: PracticeSection;
   type: PracticeType;
   title: string | null;
   parts: PartScore[];
@@ -29,16 +39,15 @@ type PracticeRecord = {
 };
 type Tab = 'analysis' | 'records';
 
-const PART_TOTALS: Record<1 | 2 | 3 | 4, number> = { 1: 6, 2: 25, 3: 39, 4: 30 };
-const PART_OPTIONS: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
-
-function defaultParts(type: PracticeType): PartScore[] {
-  const parts: Array<1 | 2 | 3 | 4> = type === 'full_mock' ? PART_OPTIONS : [2];
-  return parts.map((part) => ({ part, correct: 0, total: PART_TOTALS[part] }));
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
-function typeLabel(type: PracticeType) {
-  return type === 'full_mock' ? '完整模考' : '专项训练';
+const PART_OPTIONS: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
+
+function typeLabel(type: PracticeType, section: PracticeSection = 'listening') {
+  if (type === 'part_drill') return '专项训练';
+  return section === 'reading' ? '完整阅读' : '完整模考';
 }
 
 function formatPct(ratio: number | null) {
@@ -137,7 +146,7 @@ function PartDiagnosticChart({ diagnostic }: { diagnostic: PartDiagnostic }) {
           <p className="mt-1 text-2xl font-bold text-stone-900">{formatPct(diagnostic.longTermRatio)}</p>
           <p className="mt-3 text-xs text-stone-500">800 基准</p>
           <p className="mt-1 text-sm font-medium text-stone-800">
-            至少 {diagnostic.targetCorrect}/{PART_TOTALS[diagnostic.part]}, 最多错 {diagnostic.maxWrong}
+            至少 {diagnostic.targetCorrect}/{PRACTICE_PART_TOTALS[diagnostic.part]}, 最多错 {diagnostic.maxWrong}
           </p>
           <p className="mt-3 text-xs font-medium text-stone-600">{formatGap((diagnostic.longTermRatio ?? 0) - diagnostic.targetRatio)}</p>
         </div>
@@ -166,7 +175,7 @@ function PracticeRecordListItem({
       </div>
 
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-stone-900">{typeLabel(record.type)}</p>
+        <p className="text-sm font-semibold text-stone-900">{typeLabel(record.type, record.section ?? 'listening')}</p>
         {source.label ? (
           source.href ? <a href={source.href} target="_blank" rel="noreferrer" className="mt-1 inline-flex max-w-full items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 hover:underline">{source.label}<span aria-hidden="true">↗</span></a>
             : <p className="mt-1 truncate text-sm text-stone-500" title={source.label}>{source.label}</p>
@@ -200,11 +209,13 @@ function PracticeRecordListItem({
 
 export default function MockExamsPage() {
   const [history, setHistory] = useState<PracticeRecord[]>([]);
+  const [activeSection, setActiveSection] = useState<PracticeSection>('listening');
   const [showAddModal, setShowAddModal] = useState(false);
   const [practiceDate, setPracticeDate] = useState('');
+  const [practiceSection, setPracticeSection] = useState<PracticeSection>('listening');
   const [practiceType, setPracticeType] = useState<PracticeType>('full_mock');
   const [title, setTitle] = useState('');
-  const [parts, setParts] = useState<PartScore[]>(defaultParts('full_mock'));
+  const [parts, setParts] = useState<PartScore[]>(defaultPracticeParts('listening', 'full_mock'));
   const [scenarios, setScenarios] = useState<ScenarioRow[]>([]);
   const [attachments, setAttachments] = useState<PracticeAttachment[]>([]);
   const [editingRecord, setEditingRecord] = useState<PracticeRecord | null>(null);
@@ -217,14 +228,16 @@ export default function MockExamsPage() {
   const [historyError, setHistoryError] = useState('');
   const [tab, setTab] = useState<Tab>('analysis');
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const filteredHistory = filterRecordsBySection(history, activeSection);
+  const totalPages = Math.max(1, Math.ceil(filteredHistory.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageHistory = history.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const partAttempts: PartAttempt[] = history.flatMap((record) =>
+  const pageHistory = filteredHistory.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const listeningHistory = filterRecordsBySection(history, 'listening');
+  const partAttempts: PartAttempt[] = listeningHistory.flatMap((record) =>
     record.parts.map((part) => ({
       id: record.id,
       date: record.practiceDate,
-      part: part.part,
+      part: part.part as 1 | 2 | 3 | 4,
       correct: part.correct,
       total: part.total,
     })),
@@ -232,22 +245,36 @@ export default function MockExamsPage() {
   const diagnostics = buildPartDiagnostics(partAttempts);
   const diagnosticsByPart = new Map(diagnostics.map((diagnostic) => [diagnostic.part, diagnostic]));
 
+  async function fetchHistory(signal?: AbortSignal): Promise<PracticeRecord[]> {
+    const res = await fetch('/api/mock-exams', { signal });
+    if (!res.ok) throw new Error();
+    return res.json();
+  }
+
   async function load() {
     try {
-      const res = await fetch('/api/mock-exams');
-      if (!res.ok) throw new Error();
-      setHistory(await res.json());
+      setHistory(await fetchHistory());
     } catch {
       setHistoryError('练习记录加载失败,请刷新重试');
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchHistory(controller.signal)
+      .then(setHistory)
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setHistoryError('练习记录加载失败,请刷新重试');
+      });
+    return () => controller.abort();
+  }, []);
 
-  function resetForm() {
+  function resetForm(section: PracticeSection = activeSection) {
     setPracticeDate('');
+    setPracticeSection(section);
     setPracticeType('full_mock');
     setTitle('');
-    setParts(defaultParts('full_mock'));
+    setParts(defaultPracticeParts(section, 'full_mock'));
     setScenarios([]);
     setAttachments([]);
     setError('');
@@ -267,8 +294,8 @@ export default function MockExamsPage() {
       })));
       setError('');
       setAttachments(next);
-    } catch (err: any) {
-      setError(err.message ?? '图片读取失败');
+    } catch (err: unknown) {
+      setError(errorMessage(err, '图片读取失败'));
     }
   }
 
@@ -298,8 +325,8 @@ export default function MockExamsPage() {
       setEditingAttachments((current) => [...current, ...next]);
       setAttachmentError('');
       e.target.value = '';
-    } catch (err: any) {
-      setAttachmentError(err.message ?? '图片读取失败');
+    } catch (err: unknown) {
+      setAttachmentError(errorMessage(err, '图片读取失败'));
     }
   }
 
@@ -330,21 +357,34 @@ export default function MockExamsPage() {
 
   function changeType(type: PracticeType) {
     setPracticeType(type);
-    setParts(defaultParts(type));
+    setParts(defaultPracticeParts(practiceSection, type));
     setTitle(type === 'full_mock' ? '' : '专项训练');
   }
 
-  function togglePart(part: 1 | 2 | 3 | 4, enabled: boolean) {
+  function changePracticeSection(section: PracticeSection) {
+    setPracticeSection(section);
+    setParts(defaultPracticeParts(section, practiceType));
+    setScenarios([]);
+    setTitle(practiceType === 'full_mock' ? '' : '专项训练');
+  }
+
+  function changeActiveSection(section: PracticeSection) {
+    setActiveSection(section);
+    setPage(1);
+    if (section === 'reading') setTab('records');
+  }
+
+  function togglePart(part: PracticePartNumber, enabled: boolean) {
     setParts((prev) => {
       if (enabled) {
         if (prev.some((p) => p.part === part)) return prev;
-        return [...prev, { part, correct: 0, total: PART_TOTALS[part] }].sort((a, b) => a.part - b.part);
+        return [...prev, { part, correct: 0, total: PRACTICE_PART_TOTALS[part] }].sort((a, b) => a.part - b.part);
       }
       return prev.filter((p) => p.part !== part);
     });
   }
 
-  function updatePart(part: 1 | 2 | 3 | 4, field: 'correct' | 'total', value: number) {
+  function updatePart(part: PracticePartNumber, field: 'correct' | 'total', value: number) {
     setParts((prev) => prev.map((p) => (p.part === part ? { ...p, [field]: value } : p)));
   }
 
@@ -372,10 +412,11 @@ export default function MockExamsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           practiceDate,
+          section: practiceSection,
           type: practiceType,
           title: title.trim() || null,
           parts,
-          scenarios,
+          scenarios: practiceSection === 'listening' ? scenarios : [],
           attachments: attachments.map(({ name, mimeType, dataUrl }) => ({ name, mimeType, dataUrl })),
         }),
       });
@@ -384,7 +425,9 @@ export default function MockExamsPage() {
         setError(body.error ?? '保存失败,请重试');
         return;
       }
-      resetForm();
+      setActiveSection(practiceSection);
+      setTab('records');
+      resetForm(practiceSection);
       setShowAddModal(false);
       setPage(1);
       load();
@@ -402,15 +445,52 @@ export default function MockExamsPage() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-stone-900">练习记录</h1>
           <button
-            onClick={() => { resetForm(); setShowAddModal(true); }}
+            onClick={() => { resetForm(activeSection); setShowAddModal(true); }}
             className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
           >
-            + 记录一次练习
+            + 记录{activeSection === 'reading' ? '阅读' : '听力'}练习
           </button>
         </div>
 
-        <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="记录一次练习">
+        <div className="mb-6 inline-flex rounded-lg border border-stone-200 bg-white p-1">
+          {([['listening', '听力'], ['reading', '阅读']] as const).map(([section, label]) => (
+            <button
+              key={section}
+              type="button"
+              onClick={() => changeActiveSection(section)}
+              className={
+                'min-w-24 rounded-md px-5 py-2 text-sm font-medium transition-colors ' +
+                (activeSection === section
+                  ? 'bg-stone-900 text-white'
+                  : 'text-stone-500 hover:bg-stone-50 hover:text-stone-800')
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title={`记录${practiceSection === 'reading' ? '阅读' : '听力'}练习`}>
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div>
+              <p className="mb-2 text-xs font-medium text-stone-400">练习科目</p>
+              <div className="inline-flex rounded-lg border border-stone-200 bg-stone-50 p-1">
+                {([['listening', '听力'], ['reading', '阅读']] as const).map(([section, label]) => (
+                  <button
+                    key={section}
+                    type="button"
+                    onClick={() => changePracticeSection(section)}
+                    className={
+                      'min-w-20 rounded-md px-4 py-2 text-sm font-medium ' +
+                      (practiceSection === section ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500')
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-2">
               {(['full_mock', 'part_drill'] as const).map((type) => (
                 <button
@@ -422,7 +502,7 @@ export default function MockExamsPage() {
                     (practiceType === type ? 'bg-indigo-600 text-white' : 'border border-stone-200 bg-white text-stone-600')
                   }
                 >
-                  {typeLabel(type)}
+                  {typeLabel(type, practiceSection)}
                 </button>
               ))}
             </div>
@@ -443,7 +523,11 @@ export default function MockExamsPage() {
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder={practiceType === 'full_mock' ? '例如 ETS Test 1' : '例如 Part 3 长对话专项'}
+                  placeholder={
+                    practiceSection === 'reading'
+                      ? (practiceType === 'full_mock' ? '例如 ETS Test 1 阅读' : '例如 Part 6 专项')
+                      : (practiceType === 'full_mock' ? '例如 ETS Test 1' : '例如 Part 3 长对话专项')
+                  }
                   className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm"
                 />
               </label>
@@ -452,7 +536,7 @@ export default function MockExamsPage() {
             <div>
               <p className="mb-2 text-xs font-medium text-stone-400">本次包含的 Part</p>
               <div className="flex flex-col gap-3">
-                {PART_OPTIONS.map((part) => {
+                {partOptionsForSection(practiceSection).map((part) => {
                   const score = parts.find((p) => p.part === part);
                   const enabled = Boolean(score);
                   return (
@@ -494,7 +578,7 @@ export default function MockExamsPage() {
               </div>
             </div>
 
-            <div>
+            {practiceSection === 'listening' ? <div>
               <p className="mb-2 text-xs font-medium text-stone-400">场景细分(选填)</p>
               <div className="flex flex-col gap-2">
                 {scenarios.map((s, i) => (
@@ -525,7 +609,7 @@ export default function MockExamsPage() {
                   + 添加场景
                 </button>
               </div>
-            </div>
+            </div> : null}
 
             <div>
               <p className="mb-2 text-xs font-medium text-stone-400">错题图片（可选）</p>
@@ -589,7 +673,7 @@ export default function MockExamsPage() {
           </div>
         ) : null}
 
-        <div className="mb-8 inline-flex w-full rounded-lg border border-stone-200 bg-white p-1 sm:w-auto">
+        {activeSection === 'listening' ? <div className="mb-8 inline-flex w-full rounded-lg border border-stone-200 bg-white p-1 sm:w-auto">
           {([
             ['analysis', '分析'],
             ['records', '记录'],
@@ -606,12 +690,12 @@ export default function MockExamsPage() {
               {label}
             </button>
           ))}
-        </div>
+        </div> : null}
 
         {historyError && <p className="mb-3 text-sm text-red-600">{historyError}</p>}
 
-        {tab === 'analysis' ? (
-          history.length === 0 && !historyError ? (
+        {activeSection === 'listening' && tab === 'analysis' ? (
+          listeningHistory.length === 0 && !historyError ? (
             <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
               还没有练习记录
             </div>
@@ -632,7 +716,7 @@ export default function MockExamsPage() {
                   return (
                     <section key={part} className="rounded-2xl border border-dashed border-stone-200 bg-white p-5 text-stone-500">
                       <h2 className="text-lg font-semibold text-stone-900">Part {part}</h2>
-                      <p className="mt-2 text-sm">还没有这个 Part 的练习记录。基准线: {formatPct(target.targetRatio)}, 至少 {target.targetCorrect}/{PART_TOTALS[part]}。</p>
+                      <p className="mt-2 text-sm">还没有这个 Part 的练习记录。基准线: {formatPct(target.targetRatio)}, 至少 {target.targetCorrect}/{PRACTICE_PART_TOTALS[part]}。</p>
                     </section>
                   );
                 }
@@ -644,10 +728,13 @@ export default function MockExamsPage() {
         ) : (
           <>
             <div className="mb-3 flex items-end justify-between gap-3">
-              <div><h2 className="text-lg font-semibold text-stone-900">练习历史</h2><p className="mt-1 text-sm text-stone-500">成绩、来源和错题图片集中在同一条记录中。</p></div>
-              <span className="text-xs font-medium text-stone-400">共 {history.length} 条</span>
+              <div>
+                <h2 className="text-lg font-semibold text-stone-900">{activeSection === 'reading' ? '阅读练习历史' : '听力练习历史'}</h2>
+                <p className="mt-1 text-sm text-stone-500">成绩、来源和错题图片集中在同一条记录中。</p>
+              </div>
+              <span className="text-xs font-medium text-stone-400">共 {filteredHistory.length} 条</span>
             </div>
-            {history.length === 0 && !historyError ? (
+            {filteredHistory.length === 0 && !historyError ? (
               <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
                 还没有练习记录
               </div>

@@ -1,8 +1,11 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import { jsonrepair } from 'jsonrepair';
+import type OpenAI from 'openai';
+import { zodTextFormat } from 'openai/helpers/zod';
+import { z } from 'zod';
 import { sanitizeScenario } from './scenarios';
 
 export class TruncatedAiResponseError extends Error {}
+
+class RetryableAiResponseError extends Error {}
 
 export type ParsedCandidate = {
   term: string;
@@ -18,38 +21,27 @@ export type ParsedCandidate = {
   exampleWasAiGenerated: boolean;
 };
 
-const EXTRACT_TOOL = {
-  name: 'record_knowledge_points',
-  description: '记录从笔记中解析出的 TOEIC 听力知识点',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      items: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            term: { type: 'string' },
-            meaning: { type: 'string' },
-            example: { type: 'string' },
-            notes: { type: ['string', 'null'] },
-            part: { type: 'integer', enum: [1, 2, 3, 4] },
-            dateAdded: { type: 'string' },
-            scenarioMajor: { type: 'string' },
-            scenarioMinor: { type: 'string' },
-            meaningWasAiGenerated: { type: 'boolean' },
-            exampleWasAiGenerated: { type: 'boolean' },
-          },
-          required: [
-            'term', 'meaning', 'example', 'notes', 'part', 'dateAdded',
-            'scenarioMajor', 'scenarioMinor', 'meaningWasAiGenerated', 'exampleWasAiGenerated',
-          ],
-        },
-      },
-    },
-    required: ['items'],
-  },
-};
+const PartSchema = z.union([
+  z.literal(1), z.literal(2), z.literal(3), z.literal(4),
+  z.enum(['1', '2', '3', '4', 'Part1', 'Part2', 'Part3', 'Part4']),
+]);
+
+const ExtractedItemSchema = z.object({
+  term: z.string(),
+  meaning: z.string(),
+  example: z.string(),
+  notes: z.string().nullable(),
+  part: PartSchema,
+  dateAdded: z.string(),
+  scenarioMajor: z.string(),
+  scenarioMinor: z.string(),
+  meaningWasAiGenerated: z.boolean(),
+  exampleWasAiGenerated: z.boolean(),
+});
+
+const ExtractedItemsSchema = z.object({ items: z.array(ExtractedItemSchema) });
+
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
 
 export function buildSystemPrompt(scenarioTaxonomy: Record<string, string[]>, fallbackDate: string): string {
   const taxonomyText = Object.entries(scenarioTaxonomy)
@@ -61,11 +53,11 @@ export function buildSystemPrompt(scenarioTaxonomy: Record<string, string[]>, fa
 - term 用笔记里写的原文。
 - meaning/example 如果笔记里已经写了就照抄整理,如果没写就你自己生成,并把对应的 *WasAiGenerated 标成 true。
 - notes 只在笔记原文里有额外的"高频提示/用法说明"这类内容时才填,没有就填 null,不要自己编。笔记里标注的音标(IPA)也整理进 notes 里,不要为音标发明新的字段。
-- 严格只使用 record_knowledge_points 工具定义的字段,不要新增字段(如音标单独成一个字段),也不要把 items 包装成字符串再返回,必须是真正的数组。
+- 严格只使用结构定义中的字段,不要新增字段(如音标单独成一个字段),items 必须是真正的数组。
 - dateAdded 用该条目所在的"时间:"标注日期,转成 YYYY-MM-DD;如果整篇笔记完全没有日期,用 ${fallbackDate}。
 - scenarioMajor 必须是以下列表中的大类之一,scenarioMinor 必须是该大类下列出的细类之一,如果都拿不准就用"未分类":
 ${taxonomyText}
-调用 record_knowledge_points 工具返回结果,不要输出额外文字。`;
+按指定结构返回结果,不要输出额外文字。`;
 }
 
 // A single AI call truncates well before a real day's volume: 4096 tokens
@@ -176,74 +168,53 @@ export function splitIntoBatches(rawText: string, maxEntriesPerBatch = MAX_ENTRI
   return chunks;
 }
 
-// Confirmed against a real document: the model sometimes ignores the tool
-// schema under load (observed on 3 of 8 real batches, all covering
-// phonetic-transcription-heavy content) and returns `items` as a string
-// containing JSON text instead of a true array, occasionally with `part`
-// as "Part4" instead of the integer 4. Recover both rather than crash.
-function normalizeItems(rawItems: unknown): any[] {
-  let items = rawItems;
-  if (typeof items === 'string') {
-    // Confirmed against a real document: when the model falls back to
-    // hand-writing `items` as a JSON-text string instead of a true array,
-    // it sometimes forgets to escape a literal `"` that appears inside the
-    // note's own text (e.g. a quoted term used for emphasis, like 此处不要
-    // 理解成"文件备份" in the user's real notes) -- plain JSON.parse can't
-    // recover from that, but jsonrepair specifically handles this exact
-    // class of LLM JSON-generation mistake (unescaped quotes, trailing
-    // commas, etc.) instead of requiring the string to already be valid.
-    try {
-      items = JSON.parse(jsonrepair(items));
-    } catch {
-      throw new Error('AI 解析失败,请重试');
-    }
-  }
-  if (!Array.isArray(items)) {
-    throw new Error('AI 解析失败,请重试');
-  }
-  return items;
-}
-
 function normalizePart(rawPart: unknown): number {
-  if (typeof rawPart === 'number') return rawPart;
+  if (typeof rawPart === 'number' && Number.isInteger(rawPart) && rawPart >= 1 && rawPart <= 4) {
+    return rawPart;
+  }
   if (typeof rawPart === 'string') {
-    const match = rawPart.match(/[1-4]/);
-    if (match) return Number(match[0]);
+    const match = rawPart.match(/^(?:Part)?([1-4])$/i);
+    if (match) return Number(match[1]);
   }
   throw new Error('AI 解析失败,请重试');
 }
 
 async function parseChunk(
-  client: Pick<Anthropic, 'messages'>,
+  client: Pick<OpenAI, 'responses'>,
   chunkText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<ParsedCandidate[]> {
-  const response = await client.messages.create({
-    // Switched from claude-sonnet-4-6 to Haiku 2026-06-30 -- structured
-    // extraction from semi-structured notes doesn't need Sonnet-level
-    // reasoning, and Sonnet's output pricing was burning through real
-    // API budget fast (mostly from repeated full-scale debugging runs
-    // against the real API, not normal daily usage, but Haiku cuts the
-    // ongoing per-import cost regardless). Revert this one line if
-    // parsing quality noticeably degrades in real use.
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 8192,
-    system: buildSystemPrompt(scenarioTaxonomy, fallbackDate),
-    messages: [{ role: 'user', content: chunkText }],
-    tools: [EXTRACT_TOOL as any],
-    tool_choice: { type: 'tool', name: 'record_knowledge_points' },
-  } as any);
+  const response = await client.responses.parse({
+    model: process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
+    reasoning: { effort: 'none' },
+    max_output_tokens: 8192,
+    store: false,
+    input: [
+      { role: 'system', content: buildSystemPrompt(scenarioTaxonomy, fallbackDate) },
+      { role: 'user', content: chunkText },
+    ],
+    text: { format: zodTextFormat(ExtractedItemsSchema, 'record_knowledge_points') },
+  });
 
-  if ((response as any).stop_reason === 'max_tokens') {
+  if (response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens') {
     throw new TruncatedAiResponseError('笔记条目太多,AI 解析在生成结果时被截断,请减少单次上传的条目数量后重试');
   }
-
-  const toolUse: any = (response as any).content.find((block: any) => block.type === 'tool_use');
-  if (!toolUse) {
-    throw new Error('AI 解析失败,请重试');
+  if (response.status === 'incomplete') {
+    throw new Error('AI 解析未完成,请稍后重试');
   }
-  const items = normalizeItems(toolUse.input.items);
+
+  const wasRefused = (response.output ?? []).some((item) => (
+    item.type === 'message' && item.content.some((content) => content.type === 'refusal')
+  ));
+  if (wasRefused) {
+    throw new Error('AI 拒绝处理这份笔记,请调整内容后重试');
+  }
+
+  if (!response.output_parsed) {
+    throw new RetryableAiResponseError('AI 解析失败,请重试');
+  }
+  const items = response.output_parsed.items;
 
   return items.map((item) => {
     const sanitized = sanitizeScenario(item.scenarioMajor, item.scenarioMinor);
@@ -263,26 +234,23 @@ async function parseChunk(
   });
 }
 
-// The schema-deviation that normalizeItems/normalizePart recover from is
-// stochastic (the same content can succeed on a later attempt), so retrying
-// a batch that still fails after recovery has a real chance of succeeding.
-// TruncatedAiResponseError is the one exception -- that's a deterministic
-// token-budget limit, not randomness, so retrying identical content would
-// just truncate again at the same point.
+// A completed response without parsed output can succeed on a later attempt.
 const MAX_ATTEMPTS_PER_CHUNK = 3;
 
 async function parseChunkWithRetry(
-  client: Pick<Anthropic, 'messages'>,
+  client: Pick<OpenAI, 'responses'>,
   chunkText: string,
   fallbackDate: string,
-  scenarioTaxonomy: Record<string, string[]>
+  scenarioTaxonomy: Record<string, string[]>,
+  maxAttempts = MAX_ATTEMPTS_PER_CHUNK,
 ): Promise<ParsedCandidate[]> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_CHUNK; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await parseChunk(client, chunkText, fallbackDate, scenarioTaxonomy);
     } catch (err) {
       if (err instanceof TruncatedAiResponseError) throw err;
+      if (!(err instanceof RetryableAiResponseError)) throw err;
       lastError = err;
     }
   }
@@ -290,10 +258,11 @@ async function parseChunkWithRetry(
 }
 
 export async function parseImportDocument(
-  client: Pick<Anthropic, 'messages'>,
+  client: Pick<OpenAI, 'responses'>,
   rawText: string,
   fallbackDate: string,
-  scenarioTaxonomy: Record<string, string[]>
+  scenarioTaxonomy: Record<string, string[]>,
+  maxAttempts = MAX_ATTEMPTS_PER_CHUNK,
 ): Promise<ParsedCandidate[]> {
   const chunks = splitIntoBatches(rawText);
   // No numbered entries detected (e.g. a single-term lookup from
@@ -301,19 +270,21 @@ export async function parseImportDocument(
   // rather than silently returning nothing.
   const effectiveChunks = chunks.length > 0 ? chunks : [rawText];
   const results = await Promise.all(
-    effectiveChunks.map((chunk) => parseChunkWithRetry(client, chunk, fallbackDate, scenarioTaxonomy))
+    effectiveChunks.map((chunk) => (
+      parseChunkWithRetry(client, chunk, fallbackDate, scenarioTaxonomy, maxAttempts)
+    ))
   );
   return results.flat();
 }
 
 export async function suggestForTerm(
-  client: Pick<Anthropic, 'messages'>,
+  client: Pick<OpenAI, 'responses'>,
   term: string,
   part: number,
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<{ meaning: string; example: string; scenarioMajor: string; scenarioMinor: string }> {
   const fakeNote = `Part${part}\n时间:2026-01-01\n1. ${term}`;
-  const [first] = await parseImportDocument(client, fakeNote, '2026-01-01', scenarioTaxonomy);
+  const [first] = await parseImportDocument(client, fakeNote, '2026-01-01', scenarioTaxonomy, 1);
   return {
     meaning: first.meaning,
     example: first.example,

@@ -15,6 +15,68 @@ const VALID = {
 };
 
 describe('createMockExam', () => {
+  it('creates a reading part-drill record with Part 5', async () => {
+    await withTestClient(async (client) => {
+      const result = await createMockExam(client, {
+        practiceDate: '2026-08-11',
+        section: 'reading',
+        type: 'part_drill',
+        title: 'Part 5专项',
+        parts: [{ part: 5, correct: 24, total: 30 }],
+        scenarios: [],
+      });
+
+      expect(result.section).toBe('reading');
+      expect(result.parts).toEqual([{ part: 5, correct: 24, total: 30 }]);
+    });
+  });
+
+  it('creates a complete reading record with Parts 5-7', async () => {
+    await withTestClient(async (client) => {
+      const result = await createMockExam(client, {
+        practiceDate: '2026-08-11',
+        section: 'reading',
+        type: 'full_mock',
+        parts: [
+          { part: 5, correct: 24, total: 30 },
+          { part: 6, correct: 13, total: 16 },
+          { part: 7, correct: 43, total: 54 },
+        ],
+        scenarios: [],
+      });
+
+      expect(result.section).toBe('reading');
+      expect(result.parts.map((score) => score.part)).toEqual([5, 6, 7]);
+    });
+  });
+
+  it('rejects a complete reading record that omits a reading Part', async () => {
+    await withTestClient(async (client) => {
+      await expect(createMockExam(client, {
+        practiceDate: '2026-08-11',
+        section: 'reading',
+        type: 'full_mock',
+        parts: [
+          { part: 5, correct: 24, total: 30 },
+          { part: 6, correct: 13, total: 16 },
+        ],
+        scenarios: [],
+      })).rejects.toThrow(/Part 5-7/);
+    });
+  });
+
+  it('rejects a listening Part inside a reading record', async () => {
+    await withTestClient(async (client) => {
+      await expect(createMockExam(client, {
+        practiceDate: '2026-08-11',
+        section: 'reading',
+        type: 'part_drill',
+        parts: [{ part: 4, correct: 20, total: 30 }],
+        scenarios: [],
+      })).rejects.toThrow(/Part 5-7/);
+    });
+  });
+
   it('creates a practice-session row plus scenario breakdown rows', async () => {
     await withTestClient(async (client) => {
       const result = await createMockExam(client, VALID);
@@ -51,6 +113,7 @@ describe('createMockExam', () => {
         scenarios: [],
       });
       expect(result.type).toBe('full_mock');
+      expect(result.section).toBe('listening');
       expect(result.parts).toHaveLength(4);
     });
   });

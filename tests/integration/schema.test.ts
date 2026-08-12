@@ -2,6 +2,22 @@ import { describe, it, expect } from 'vitest';
 import { withTestClient } from './setup';
 
 describe('schema constraints', () => {
+  it('stores reading practice sessions and Part 5-7 scores', async () => {
+    await withTestClient(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO practice_sessions (practice_date, section, type, title)
+         VALUES ('2026-08-11', 'reading', 'part_drill', 'Part 7专项')
+         RETURNING id, section`,
+      );
+      await expect(client.query(
+        `INSERT INTO practice_part_scores (practice_session_id, part, correct, total)
+         VALUES ($1, 7, 45, 54)`,
+        [rows[0].id],
+      )).resolves.toBeDefined();
+      expect(rows[0].section).toBe('reading');
+    });
+  });
+
   it('allows an active row and a deleted row with the same unique key, but not two active rows', async () => {
     await withTestClient(async (client) => {
       const insert = `INSERT INTO knowledge_points
