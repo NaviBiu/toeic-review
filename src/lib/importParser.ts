@@ -1,5 +1,4 @@
 import type OpenAI from 'openai';
-import { zodTextFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { sanitizeScenario } from './scenarios';
 
@@ -41,7 +40,7 @@ const ExtractedItemSchema = z.object({
 
 const ExtractedItemsSchema = z.object({ items: z.array(ExtractedItemSchema) });
 
-export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
 export function buildSystemPrompt(scenarioTaxonomy: Record<string, string[]>, fallbackDate: string): string {
   const taxonomyText = Object.entries(scenarioTaxonomy)
@@ -57,7 +56,23 @@ export function buildSystemPrompt(scenarioTaxonomy: Record<string, string[]>, fa
 - dateAdded 用该条目所在的"时间:"标注日期,转成 YYYY-MM-DD;如果整篇笔记完全没有日期,用 ${fallbackDate}。
 - scenarioMajor 必须是以下列表中的大类之一,scenarioMinor 必须是该大类下列出的细类之一,如果都拿不准就用"未分类":
 ${taxonomyText}
-按指定结构返回结果,不要输出额外文字。`;
+只返回 JSON,不要输出 Markdown 或额外文字。JSON 必须严格使用以下结构:
+{
+  "items": [
+    {
+      "term": "英文词或短语",
+      "meaning": "中文释义",
+      "example": "英文例句",
+      "notes": null,
+      "part": 1,
+      "dateAdded": "${fallbackDate}",
+      "scenarioMajor": "未分类",
+      "scenarioMinor": "未分类",
+      "meaningWasAiGenerated": false,
+      "exampleWasAiGenerated": false
+    }
+  ]
+}`;
 }
 
 // A single AI call truncates well before a real day's volume: 4096 tokens
@@ -180,41 +195,55 @@ function normalizePart(rawPart: unknown): number {
 }
 
 async function parseChunk(
-  client: Pick<OpenAI, 'responses'>,
+  client: Pick<OpenAI, 'chat'>,
   chunkText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<ParsedCandidate[]> {
-  const response = await client.responses.parse({
-    model: process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
-    reasoning: { effort: 'none' },
-    max_output_tokens: 8192,
-    store: false,
-    input: [
+  const request = {
+    model: process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL,
+    max_tokens: 8192,
+    response_format: { type: 'json_object' },
+    messages: [
       { role: 'system', content: buildSystemPrompt(scenarioTaxonomy, fallbackDate) },
       { role: 'user', content: chunkText },
     ],
-    text: { format: zodTextFormat(ExtractedItemsSchema, 'record_knowledge_points') },
-  });
+    stream: false,
+    thinking: { type: 'disabled' },
+  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
+    thinking: { type: 'disabled' };
+  };
+  const response = await client.chat.completions.create(request);
 
-  if (response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens') {
+  const choice = response.choices[0];
+  const finishReason = choice?.finish_reason as string | undefined;
+  if (finishReason === 'length') {
     throw new TruncatedAiResponseError('笔记条目太多,AI 解析在生成结果时被截断,请减少单次上传的条目数量后重试');
   }
-  if (response.status === 'incomplete') {
-    throw new Error('AI 解析未完成,请稍后重试');
-  }
-
-  const wasRefused = (response.output ?? []).some((item) => (
-    item.type === 'message' && item.content.some((content) => content.type === 'refusal')
-  ));
-  if (wasRefused) {
+  if (finishReason === 'content_filter') {
     throw new Error('AI 拒绝处理这份笔记,请调整内容后重试');
   }
+  if (finishReason === 'insufficient_system_resource') {
+    throw new Error('DeepSeek 服务繁忙,请稍后重试');
+  }
 
-  if (!response.output_parsed) {
+  const content = choice?.message.content?.trim();
+  if (!content) {
     throw new RetryableAiResponseError('AI 解析失败,请重试');
   }
-  const items = response.output_parsed.items;
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(content);
+  } catch {
+    throw new RetryableAiResponseError('AI 解析失败,请重试');
+  }
+
+  const parsed = ExtractedItemsSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    throw new RetryableAiResponseError('AI 解析失败,请重试');
+  }
+  const items = parsed.data.items;
 
   return items.map((item) => {
     const sanitized = sanitizeScenario(item.scenarioMajor, item.scenarioMinor);
@@ -238,7 +267,7 @@ async function parseChunk(
 const MAX_ATTEMPTS_PER_CHUNK = 3;
 
 async function parseChunkWithRetry(
-  client: Pick<OpenAI, 'responses'>,
+  client: Pick<OpenAI, 'chat'>,
   chunkText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>,
@@ -258,7 +287,7 @@ async function parseChunkWithRetry(
 }
 
 export async function parseImportDocument(
-  client: Pick<OpenAI, 'responses'>,
+  client: Pick<OpenAI, 'chat'>,
   rawText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>,
@@ -278,7 +307,7 @@ export async function parseImportDocument(
 }
 
 export async function suggestForTerm(
-  client: Pick<OpenAI, 'responses'>,
+  client: Pick<OpenAI, 'chat'>,
   term: string,
   part: number,
   scenarioTaxonomy: Record<string, string[]>

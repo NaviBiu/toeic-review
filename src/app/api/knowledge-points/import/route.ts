@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/db';
 import { extractText, UnsupportedFileTypeError, FileTooLargeError } from '@/lib/fileExtract';
 import { parseImportDocument, TruncatedAiResponseError } from '@/lib/importParser';
-import { createOpenAIClient } from '@/lib/openaiClient';
+import { createDeepSeekClient } from '@/lib/deepseekClient';
 import { findMatch } from '@/lib/knowledgePoints';
 import { decideDedup } from '@/lib/importDedup';
 import { SCENARIOS } from '@/lib/scenarios';
@@ -28,20 +28,20 @@ function getAiFailureDetails(err: unknown): {
   const normalizedMessage = message.toLowerCase();
 
   let userMessage = 'AI 解析失败，请稍后重试';
-  if (/missing credentials|openai_api_key.*environment variable/.test(normalizedMessage)) {
-    userMessage = 'OpenAI API 尚未配置，请先设置 OPENAI_API_KEY';
+  if (/deepseek_api_key.*not configured|missing credentials/.test(normalizedMessage)) {
+    userMessage = 'DeepSeek API 尚未配置，请先设置 DEEPSEEK_API_KEY';
   } else if (
     code === 'insufficient_quota'
     || status === 402
     || /current quota|insufficient quota|credit balance|billing|payment required/.test(normalizedMessage)
   ) {
-    userMessage = 'OpenAI API 余额不足或已达到使用限额，请检查计费和用量设置';
+    userMessage = 'DeepSeek API 余额不足或已达到使用限额，请检查计费和用量设置';
   } else if (status === 401 || status === 403) {
-    userMessage = 'OpenAI API 密钥无效或权限不足，请更新密钥后重试';
+    userMessage = 'DeepSeek API 密钥无效或权限不足，请更新密钥后重试';
   } else if (status === 429) {
-    userMessage = 'OpenAI API 请求过于频繁，请稍后重试';
+    userMessage = 'DeepSeek API 请求过于频繁，请稍后重试';
   } else if (status != null && status >= 500) {
-    userMessage = 'OpenAI API 服务暂时不可用，请稍后再试';
+    userMessage = 'DeepSeek API 服务暂时不可用，请稍后再试';
   }
 
   return { userMessage, log: { name, status, code, message } };
@@ -69,8 +69,8 @@ export async function POST(req: NextRequest) {
 
   let candidates;
   try {
-    const openai = createOpenAIClient();
-    candidates = await parseImportDocument(openai, rawText, today, SCENARIOS);
+    const deepseek = createDeepSeekClient();
+    candidates = await parseImportDocument(deepseek, rawText, today, SCENARIOS);
   } catch (err) {
     if (err instanceof TruncatedAiResponseError) {
       return NextResponse.json({ error: err.message }, { status: 400 });

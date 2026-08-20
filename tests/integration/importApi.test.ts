@@ -23,7 +23,7 @@ vi.mock('@/lib/fileExtract', async () => {
   };
 });
 
-vi.stubEnv('OPENAI_API_KEY', 'test-key');
+vi.stubEnv('DEEPSEEK_API_KEY', 'test-key');
 
 const { POST: importRoute } = await import('../../src/app/api/knowledge-points/import/route');
 const { POST: confirmRoute } = await import('../../src/app/api/knowledge-points/import/confirm/route');
@@ -39,8 +39,8 @@ afterEach(async () => {
 });
 
 describe('POST /api/knowledge-points/import', () => {
-  it('explains that OPENAI_API_KEY is missing before any API request is attempted', async () => {
-    vi.stubEnv('OPENAI_API_KEY', '');
+  it('explains that DEEPSEEK_API_KEY is missing before any API request is attempted', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', '');
     try {
       const form = new FormData();
       form.append('file', new File(['hello'], 'notes.docx'));
@@ -50,13 +50,13 @@ describe('POST /api/knowledge-points/import', () => {
       const body = await res.json();
 
       expect(res.status).toBe(502);
-      expect(body.error).toBe('OpenAI API 尚未配置，请先设置 OPENAI_API_KEY');
+      expect(body.error).toBe('DeepSeek API 尚未配置，请先设置 DEEPSEEK_API_KEY');
     } finally {
-      vi.stubEnv('OPENAI_API_KEY', 'test-key');
+      vi.stubEnv('DEEPSEEK_API_KEY', 'test-key');
     }
   });
 
-  it('returns an actionable message when the OpenAI API key is invalid', async () => {
+  it('returns an actionable message when the DeepSeek API key is invalid', async () => {
     vi.mocked(parseImportDocument).mockRejectedValueOnce(
       Object.assign(new Error('Incorrect API key provided'), { status: 401 }),
     );
@@ -68,10 +68,10 @@ describe('POST /api/knowledge-points/import', () => {
     const body = await res.json();
 
     expect(res.status).toBe(502);
-    expect(body.error).toBe('OpenAI API 密钥无效或权限不足，请更新密钥后重试');
+    expect(body.error).toBe('DeepSeek API 密钥无效或权限不足，请更新密钥后重试');
   });
 
-  it('returns an actionable message when the OpenAI API quota is exhausted', async () => {
+  it('returns an actionable message when the DeepSeek API balance is exhausted', async () => {
     vi.mocked(parseImportDocument).mockRejectedValueOnce(
       Object.assign(new Error('You exceeded your current quota'), { status: 429, code: 'insufficient_quota' }),
     );
@@ -83,7 +83,7 @@ describe('POST /api/knowledge-points/import', () => {
     const body = await res.json();
 
     expect(res.status).toBe(502);
-    expect(body.error).toBe('OpenAI API 余额不足或已达到使用限额，请检查计费和用量设置');
+    expect(body.error).toBe('DeepSeek API 余额不足或已达到使用限额，请检查计费和用量设置');
   });
 
   it('rejects an unsupported file extension before the parser ever runs', async () => {

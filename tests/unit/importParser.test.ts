@@ -14,6 +14,15 @@ function flatEntries(n: number, start = 1) {
   return Array.from({ length: n }, (_, i) => `${start + i}. term${start + i} 释义说明`).join(' ');
 }
 
+function jsonCompletion(value: unknown, finishReason = 'stop') {
+  return {
+    choices: [{
+      finish_reason: finishReason,
+      message: { content: value == null ? null : JSON.stringify(value) },
+    }],
+  };
+}
+
 describe('buildSystemPrompt', () => {
   it('includes every scenario major in the prompt', () => {
     const prompt = buildSystemPrompt(SCENARIOS, '2026-06-26');
@@ -26,7 +35,7 @@ describe('buildSystemPrompt', () => {
 describe('parseImportDocument', () => {
   function fakeClient(items: any[]) {
     return {
-      responses: { parse: async () => ({ status: 'completed', output_parsed: { items } }) },
+      chat: { completions: { create: async () => jsonCompletion({ items }) } },
     } as any;
   }
 
@@ -54,28 +63,25 @@ describe('parseImportDocument', () => {
   });
 
   it('throws a friendly error when the AI does not return parsed structured output', async () => {
-    const client = { responses: { parse: async () => ({ status: 'completed', output_parsed: null }) } } as any;
+    const client = { chat: { completions: { create: async () => jsonCompletion(null) } } } as any;
     await expect(parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS)).rejects.toThrow('AI 解析失败');
   });
 
   it('retries a chunk that has no parsed output and succeeds on a later response', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount++;
           if (callCount < 3) {
-            return { status: 'completed', output_parsed: null };
+            return jsonCompletion(null);
           }
-          return {
-            status: 'completed',
-            output_parsed: { items: [{
+          return jsonCompletion({ items: [{
               term: 'venue', meaning: '场馆', example: 'ex', notes: null, part: 4,
               dateAdded: '2026-06-27', scenarioMajor: '娱乐', scenarioMinor: '剧场',
               meaningWasAiGenerated: false, exampleWasAiGenerated: false,
-            }] },
-          };
-        },
+            }] });
+        } },
       },
     } as any;
     const result = await parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS);
@@ -87,7 +93,7 @@ describe('parseImportDocument', () => {
   it('gives up after 3 attempts if the AI never returns parsed output', async () => {
     let callCount = 0;
     const client = {
-      responses: { parse: async () => { callCount++; return { status: 'completed', output_parsed: null }; } },
+      chat: { completions: { create: async () => { callCount++; return jsonCompletion(null); } } },
     } as any;
     await expect(parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS)).rejects.toThrow('AI 解析失败');
     expect(callCount).toBe(3);
@@ -96,11 +102,11 @@ describe('parseImportDocument', () => {
   it('does not retry a TruncatedAiResponseError -- the same content would truncate again deterministically', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount++;
-          return { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_parsed: null };
-        },
+          return jsonCompletion({ items: [] }, 'length');
+        } },
       },
     } as any;
     await expect(parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS)).rejects.toThrow('被截断');
@@ -110,11 +116,11 @@ describe('parseImportDocument', () => {
   it('does not retry an API error because SDK retries are disabled and each request costs money', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount++;
           throw Object.assign(new Error('rate limited'), { status: 429 });
-        },
+        } },
       },
     } as any;
 
@@ -125,15 +131,11 @@ describe('parseImportDocument', () => {
   it('does not retry a model refusal', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount++;
-          return {
-            status: 'completed',
-            output_parsed: null,
-            output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'Cannot process this content.' }] }],
-          };
-        },
+          return jsonCompletion(null, 'content_filter');
+        } },
       },
     } as any;
 
@@ -141,18 +143,18 @@ describe('parseImportDocument', () => {
     expect(callCount).toBe(1);
   });
 
-  it('does not retry an incomplete response for a reason other than output token truncation', async () => {
+  it('does not retry a response interrupted by insufficient system resources', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount++;
-          return { status: 'incomplete', incomplete_details: { reason: 'content_filter' }, output_parsed: null };
-        },
+          return jsonCompletion(null, 'insufficient_system_resource');
+        } },
       },
     } as any;
 
-    await expect(parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS)).rejects.toThrow('未完成');
+    await expect(parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS)).rejects.toThrow('服务繁忙');
     expect(callCount).toBe(1);
   });
 
@@ -177,25 +179,25 @@ describe('parseImportDocument', () => {
     expect(result[0].part).toBe(4);
   });
 
-  it('uses the cost-sensitive OpenAI model with bounded output and no extra reasoning', async () => {
+  it('uses DeepSeek JSON mode with bounded output and thinking disabled', async () => {
     let params: any;
     const client = {
-      responses: {
-        parse: async (received: any) => {
+      chat: {
+        completions: { create: async (received: any) => {
           params = received;
-          return { status: 'completed', output_parsed: { items: [] } };
-        },
+          return jsonCompletion({ items: [] });
+        } },
       },
     } as any;
 
     await parseImportDocument(client, 'raw text', '2026-06-26', SCENARIOS);
 
-    expect(params.model).toBe('gpt-5.6-luna');
-    expect(params.reasoning).toEqual({ effort: 'none' });
-    expect(params.max_output_tokens).toBe(8192);
-    expect(params.store).toBe(false);
-    expect(params.input[0].role).toBe('system');
-    expect(params.input[1]).toEqual({ role: 'user', content: 'raw text' });
+    expect(params.model).toBe('deepseek-v4-flash');
+    expect(params.response_format).toEqual({ type: 'json_object' });
+    expect(params.max_tokens).toBe(8192);
+    expect(params.thinking).toEqual({ type: 'disabled' });
+    expect(params.messages[0].role).toBe('system');
+    expect(params.messages[1]).toEqual({ role: 'user', content: 'raw text' });
   });
 });
 
@@ -300,22 +302,19 @@ describe('parseImportDocument batching', () => {
   it('calls the AI once per batch and merges all results, for a document over the batch size', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async (params: any) => {
+      chat: {
+        completions: { create: async (params: any) => {
           callCount++;
           // Echo back one item per numbered entry line actually present in this call's content.
-          const lines = (params.input[1].content as string).split('\n').filter((l: string) => /^\d+\./.test(l));
-          return {
-            status: 'completed',
-            output_parsed: {
-              items: lines.map((l: string, i: number) => ({
+          const lines = (params.messages[1].content as string).split('\n').filter((l: string) => /^\d+\./.test(l));
+          return jsonCompletion({
+            items: lines.map((l: string, i: number) => ({
                 term: `t${callCount}-${i}`, meaning: 'm', example: 'e', notes: null, part: 1,
                 dateAdded: '2026-06-28', scenarioMajor: '未分类', scenarioMinor: '未分类',
                 meaningWasAiGenerated: false, exampleWasAiGenerated: false,
-              })),
-            },
-          };
-        },
+            })),
+          });
+        } },
       },
     } as any;
     const text = `Part1\n时间:2026.06.28\n${entries(45)}`;
@@ -329,11 +328,11 @@ describe('suggestForTerm', () => {
   it('does not automatically retry a single-term suggestion', async () => {
     let callCount = 0;
     const client = {
-      responses: {
-        parse: async () => {
+      chat: {
+        completions: { create: async () => {
           callCount += 1;
-          return { status: 'completed', output_parsed: null };
-        },
+          return jsonCompletion(null);
+        } },
       },
     } as any;
 
@@ -343,18 +342,15 @@ describe('suggestForTerm', () => {
 
   it('wraps the term in a single-item note and returns the parsed suggestion', async () => {
     const client = {
-      responses: {
-        parse: async (params: any) => {
-          expect(params.input[1].content).toContain('workshop');
-          return {
-            status: 'completed',
-            output_parsed: { items: [{
+      chat: {
+        completions: { create: async (params: any) => {
+          expect(params.messages[1].content).toContain('workshop');
+          return jsonCompletion({ items: [{
               term: 'workshop', meaning: '研讨会', example: 'ex', notes: null, part: 2,
               dateAdded: '2026-01-01', scenarioMajor: '一般商务', scenarioMinor: '会议',
               meaningWasAiGenerated: true, exampleWasAiGenerated: true,
-            }] },
-          };
-        },
+            }] });
+        } },
       },
     } as any;
     const result = await suggestForTerm(client, 'workshop', 2, SCENARIOS);
