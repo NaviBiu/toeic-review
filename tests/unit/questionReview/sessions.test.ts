@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import type { VercelClient } from '@vercel/postgres';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { submitAttempt } from '@/lib/questionReview/sessions';
+import { createReviewSession, submitAttempt } from '@/lib/questionReview/sessions';
 
 const requestId = '4f21de2e-e7a5-4b72-9425-c3086fa00111';
 const input = {
@@ -69,6 +69,23 @@ describe('session route input', () => {
     }));
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('session creation', () => {
+  it('rejects an empty candidate list without creating an empty session', async () => {
+    const client = clientWith([]);
+
+    await expect(createReviewSession(client, {
+      mode: 'weak_first',
+      categoryScopeId: null,
+      includeMastered: false,
+      plannedCount: 20,
+    })).rejects.toThrow('当前范围没有可练习题目');
+
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(client.query).mock.calls[0][0]).toContain('FROM review_questions');
+    expect(vi.mocked(client.query).mock.calls.some(([sql]) => String(sql).includes('INSERT INTO question_review_sessions'))).toBe(false);
   });
 });
 

@@ -130,9 +130,9 @@ describe('question review categories', () => {
          ), target_question AS (
            INSERT INTO review_questions
              (section, part, question_format, stem, option_a, option_b, option_c, option_d,
-              correct_option, analysis, category_id)
+              correct_option, analysis, category_id, status)
            SELECT 'reading', 5, 'single_choice', 'Merged target question',
-             'A', 'B', 'C', 'D', 'A', 'test', id
+             'A', 'B', 'C', 'D', 'A', 'test', id, 'mastered'
            FROM target_category
            RETURNING id
          ), inactive_question AS (
@@ -196,6 +196,8 @@ describe('question review categories', () => {
       const parentBefore = before.find((node) => node.name === '合并统计一级分类')!;
       expect(parentBefore.stats).toEqual({
         total: 2,
+        learningCount: 1,
+        masteredCount: 1,
         attempted: 1,
         unattempted: 1,
         latestCorrect: 1,

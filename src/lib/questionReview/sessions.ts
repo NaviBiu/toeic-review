@@ -214,6 +214,9 @@ export async function createReviewSession(
   const plannedCount = Math.min(100, Math.max(1, asPositiveInteger(input.plannedCount, '计划题数不正确')));
   await validateCategoryScope(client, input.categoryScopeId);
   const candidates = await loadCandidates(client, input);
+  if (candidates.length === 0) {
+    throw new SessionError('当前范围没有可练习题目', 'conflict');
+  }
   const selectedIds = selectQuestionIds(candidates, plannedCount, input.mode);
   const byId = new Map(candidates.map((candidate) => [Number(candidate.id), candidate]));
 

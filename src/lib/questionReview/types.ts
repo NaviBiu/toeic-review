@@ -4,6 +4,8 @@ export type QuestionOption = 'A' | 'B' | 'C' | 'D';
 
 export type CategoryStats = {
   total: number;
+  learningCount: number;
+  masteredCount: number;
   attempted: number;
   unattempted: number;
   latestCorrect: number;

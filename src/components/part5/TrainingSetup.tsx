@@ -18,6 +18,26 @@ export function buildTrainingSummary(planned: number, available: number) {
   return `计划 ${planned} 题，可用 ${available} 题，本次将练习 ${normalizeTrainingCount(planned, available)} 题`;
 }
 
+export function getTrainingAvailability(
+  categories: CategoryNode[],
+  categoryScopeId: number | null,
+  includeMastered: boolean,
+  plannedCount: number,
+) {
+  const scopedStats = categoryScopeId === null
+    ? categories.reduce((stats, category) => ({
+      learningCount: stats.learningCount + category.stats.learningCount,
+      masteredCount: stats.masteredCount + category.stats.masteredCount,
+    }), { learningCount: 0, masteredCount: 0 })
+    : categories.flatMap((category) => [category, ...category.children])
+      .find((category) => category.id === categoryScopeId)?.stats;
+  const available = scopedStats
+    ? scopedStats.learningCount + (includeMastered ? scopedStats.masteredCount : 0)
+    : 0;
+  const effectiveCount = normalizeTrainingCount(plannedCount, available);
+  return { available, effectiveCount, disabled: effectiveCount === 0 };
+}
+
 function categoryChoices(categories: CategoryNode[]): CategoryChoice[] {
   return categories.flatMap((category) => [
     { id: category.id, label: category.name, total: category.stats.total },
@@ -44,9 +64,7 @@ export default function TrainingSetup({
   const [plannedCount, setPlannedCount] = useState(20);
   const [includeMastered, setIncludeMastered] = useState(false);
 
-  const selectedCategory = choices.find((choice) => choice.id === categoryScopeId);
-  const available = selectedCategory?.total ?? categories.reduce((total, category) => total + category.stats.total, 0);
-  const effectiveCount = normalizeTrainingCount(plannedCount, available);
+  const availability = getTrainingAvailability(categories, categoryScopeId, includeMastered, plannedCount);
 
   function handleCountChange(value: string) {
     const next = Number(value);
@@ -54,15 +72,15 @@ export default function TrainingSetup({
   }
 
   function handleStart() {
-    if (effectiveCount === 0 || starting) return;
-    void onStart({ mode, categoryScopeId, includeMastered, plannedCount: effectiveCount });
+    if (availability.disabled || starting) return;
+    void onStart({ mode, categoryScopeId, includeMastered, plannedCount: availability.effectiveCount });
   }
 
   return (
     <section aria-labelledby="training-setup-title" className="border border-stone-200 bg-white p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-stone-200 pb-3">
         <h2 id="training-setup-title" className="text-base font-semibold text-stone-900">训练设置</h2>
-        <p className="text-sm text-stone-500">{buildTrainingSummary(plannedCount, available)}</p>
+        <p className="text-sm text-stone-500">{buildTrainingSummary(plannedCount, availability.available)}</p>
       </div>
 
       <div className="mt-4 grid gap-5 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
@@ -123,7 +141,7 @@ export default function TrainingSetup({
           <button
             type="button"
             onClick={handleStart}
-            disabled={effectiveCount === 0 || starting}
+            disabled={availability.disabled || starting}
             className="rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
           >
             {starting ? '正在创建…' : '开始训练'}

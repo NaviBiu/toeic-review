@@ -320,14 +320,16 @@ export async function listCategoryTree(
          question_attempts.attempted_at DESC,
          question_attempts.id DESC
      ), category_question_links AS (
-       SELECT category.id AS category_id, question.id AS question_id, latest_attempt.is_correct
+       SELECT category.id AS category_id, question.id AS question_id,
+         question.status AS question_status, latest_attempt.is_correct
        FROM scoped_categories category
        JOIN scoped_questions question
          ON question.category_id = category.id
         AND question.status IN ('learning', 'mastered')
        LEFT JOIN latest_attempt ON latest_attempt.question_id = question.id
        UNION ALL
-       SELECT parent.id AS category_id, question.id AS question_id, latest_attempt.is_correct
+       SELECT parent.id AS category_id, question.id AS question_id,
+         question.status AS question_status, latest_attempt.is_correct
        FROM scoped_categories parent
        JOIN scoped_categories child ON child.parent_id = parent.id
        JOIN scoped_questions question
@@ -338,6 +340,8 @@ export async function listCategoryTree(
        SELECT
          category_id,
          COUNT(question_id)::int AS total,
+         COUNT(question_id) FILTER (WHERE question_status = 'learning')::int AS learning_count,
+         COUNT(question_id) FILTER (WHERE question_status = 'mastered')::int AS mastered_count,
          COUNT(question_id) FILTER (WHERE is_correct IS NOT NULL)::int AS attempted,
          COUNT(question_id) FILTER (WHERE is_correct IS NULL)::int AS unattempted,
          COUNT(question_id) FILTER (WHERE is_correct = true)::int AS latest_correct
@@ -347,6 +351,8 @@ export async function listCategoryTree(
      SELECT
        category.*,
        COALESCE(category_stats.total, 0) AS total,
+       COALESCE(category_stats.learning_count, 0) AS learning_count,
+       COALESCE(category_stats.mastered_count, 0) AS mastered_count,
        COALESCE(category_stats.attempted, 0) AS attempted,
        COALESCE(category_stats.unattempted, 0) AS unattempted,
        COALESCE(category_stats.latest_correct, 0) AS latest_correct
@@ -375,6 +381,8 @@ export async function listCategoryTree(
     const category = mapCategory(row);
     const stats = {
       total: Number(row.total),
+      learningCount: Number(row.learning_count),
+      masteredCount: Number(row.mastered_count),
       attempted: Number(row.attempted),
       unattempted: Number(row.unattempted),
       latestCorrect: Number(row.latest_correct),
