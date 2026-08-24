@@ -258,51 +258,38 @@ export async function mergeCategory(
     return target;
   }
 
-  const { rows: childRows } = await client.query(
-    `SELECT * FROM question_categories
-     WHERE parent_id = ANY($1::int[])
-     ORDER BY parent_id, is_default DESC, sort_order, id
-     FOR UPDATE`,
-    [[source.id, target.id]],
-  );
-  const sourceChildren = childRows
-    .filter((row) => row.parent_id === source.id)
-    .map(mapCategory);
-  const targetChildren = childRows
-    .filter((row) => row.parent_id === target.id)
-    .map(mapCategory);
-
-  for (const sourceChild of sourceChildren) {
-    const targetChild = targetChildren.find((candidate) =>
-      candidate.status === 'active'
-        && candidate.name.toLocaleLowerCase() === sourceChild.name.toLocaleLowerCase(),
-    );
-    if (targetChild) {
-      await client.query(
-        `WITH moved_questions AS (
-           UPDATE review_questions SET category_id = $1, updated_at = now()
-           WHERE category_id = $2
-         )
-         UPDATE question_categories
-         SET status = 'inactive', updated_at = now()
-         WHERE id = $2`,
-        [targetChild.id, sourceChild.id],
-      );
-    } else {
-      await client.query(
-        `UPDATE question_categories
-         SET parent_id = $1, is_default = false, updated_at = now()
-         WHERE id = $2`,
-        [target.id, sourceChild.id],
-      );
-    }
-  }
-
   await client.query(
-    `UPDATE question_categories
+    `WITH source_children AS (
+       SELECT source_child.id, target_child.id AS target_child_id
+       FROM question_categories source_child
+       LEFT JOIN question_categories target_child
+         ON target_child.parent_id = $2
+        AND target_child.status = 'active'
+        AND lower(target_child.name) = lower(source_child.name)
+       WHERE source_child.parent_id = $1
+     ), moved_questions AS (
+       UPDATE review_questions question
+       SET category_id = source_children.target_child_id, updated_at = now()
+       FROM source_children
+       WHERE question.category_id = source_children.id
+         AND source_children.target_child_id IS NOT NULL
+     ), deactivated_children AS (
+       UPDATE question_categories source_child
+       SET status = 'inactive', updated_at = now()
+       FROM source_children
+       WHERE source_child.id = source_children.id
+         AND source_children.target_child_id IS NOT NULL
+     ), reparented_children AS (
+       UPDATE question_categories source_child
+       SET parent_id = $2, is_default = false, updated_at = now()
+       FROM source_children
+       WHERE source_child.id = source_children.id
+         AND source_children.target_child_id IS NULL
+     )
+     UPDATE question_categories source_parent
      SET status = 'inactive', updated_at = now()
-     WHERE id = $1`,
-    [source.id],
+     WHERE source_parent.id = $1`,
+    [source.id, target.id],
   );
   return target;
 }
@@ -313,22 +300,37 @@ export async function listCategoryTree(
 ): Promise<CategoryNode[]> {
   validateScope(filters.section, filters.part);
   const { rows } = await client.query(
-    `WITH latest_attempt AS (
-       SELECT DISTINCT ON (question_id) question_id, is_correct
+    `WITH scoped_categories AS (
+       SELECT *
+       FROM question_categories
+       WHERE section = $1 AND part = $2
+     ), scoped_questions AS (
+       SELECT question.id, question.category_id, question.status
+       FROM review_questions question
+       JOIN scoped_categories category ON category.id = question.category_id
+       WHERE question.section = $1 AND question.part = $2
+     ), latest_attempt AS (
+       SELECT DISTINCT ON (question_attempts.question_id)
+         question_attempts.question_id,
+         question_attempts.is_correct
        FROM question_attempts
-       ORDER BY question_id, attempted_at DESC, id DESC
+       JOIN scoped_questions question ON question.id = question_attempts.question_id
+       ORDER BY
+         question_attempts.question_id,
+         question_attempts.attempted_at DESC,
+         question_attempts.id DESC
      ), category_question_links AS (
        SELECT category.id AS category_id, question.id AS question_id, latest_attempt.is_correct
-       FROM question_categories category
-       JOIN review_questions question
+       FROM scoped_categories category
+       JOIN scoped_questions question
          ON question.category_id = category.id
         AND question.status IN ('learning', 'mastered')
        LEFT JOIN latest_attempt ON latest_attempt.question_id = question.id
        UNION ALL
        SELECT parent.id AS category_id, question.id AS question_id, latest_attempt.is_correct
-       FROM question_categories parent
-       JOIN question_categories child ON child.parent_id = parent.id
-       JOIN review_questions question
+       FROM scoped_categories parent
+       JOIN scoped_categories child ON child.parent_id = parent.id
+       JOIN scoped_questions question
          ON question.category_id = child.id
         AND question.status IN ('learning', 'mastered')
        LEFT JOIN latest_attempt ON latest_attempt.question_id = question.id
@@ -348,12 +350,10 @@ export async function listCategoryTree(
        COALESCE(category_stats.attempted, 0) AS attempted,
        COALESCE(category_stats.unattempted, 0) AS unattempted,
        COALESCE(category_stats.latest_correct, 0) AS latest_correct
-     FROM question_categories category
-     LEFT JOIN question_categories parent ON parent.id = category.parent_id
+     FROM scoped_categories category
+     LEFT JOIN scoped_categories parent ON parent.id = category.parent_id
      LEFT JOIN category_stats ON category_stats.category_id = category.id
-     WHERE category.section = $1
-       AND category.part = $2
-       AND (
+     WHERE (
          $3::boolean
          OR (
            category.status = 'active'

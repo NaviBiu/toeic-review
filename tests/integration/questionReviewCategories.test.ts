@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { NextRequest } from 'next/server';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createCategory,
   deleteEmptyCategory,
@@ -38,6 +39,23 @@ describe('question review categories', () => {
       })).rejects.toThrow('分类最多两级');
       await expect(updateCategory(client, child.id, { parentId: child.id }))
         .rejects.toThrow('分类不能移动到自身');
+
+      await updateCategory(client, parent.id, { status: 'inactive' });
+      expect((await listCategoryTree(client, { section: 'reading', part: 5 }))
+        .find((node) => node.id === parent.id)).toBeUndefined();
+      expect((await listCategoryTree(client, {
+        section: 'reading',
+        part: 5,
+        includeInactive: true,
+      })).find((node) => node.id === parent.id)?.children
+        .every((node) => node.status === 'active')).toBe(true);
+
+      await updateCategory(client, parent.id, { status: 'active' });
+      expect((await listCategoryTree(client, { section: 'reading', part: 5 }))
+        .find((node) => node.id === parent.id)?.children.map((node) => node.name)).toEqual([
+        '未细分',
+        '自定义二级分类',
+      ]);
     });
   }, 60_000);
 
@@ -117,6 +135,27 @@ describe('question review categories', () => {
              'A', 'B', 'C', 'D', 'A', 'test', id
            FROM target_category
            RETURNING id
+         ), inactive_question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id, status)
+           SELECT 'reading', 5, 'single_choice', 'Inactive question',
+             'A', 'B', 'C', 'D', 'A', 'test', id, 'inactive'
+           FROM target_category
+         ), deleted_question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id, status)
+           SELECT 'reading', 5, 'single_choice', 'Deleted question',
+             'A', 'B', 'C', 'D', 'A', 'test', id, 'deleted'
+           FROM target_category
+         ), mismatched_scope_question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 6, 'single_choice', 'Part 6 question in Part 5 category',
+             'A', 'B', 'C', 'D', 'A', 'test', id
+           FROM target_category
          ), session AS (
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1)
@@ -184,6 +223,14 @@ describe('question review categories', () => {
            INSERT INTO question_categories (section, part, name, sort_order)
            VALUES ('reading', 5, '目标一级分类', 103)
            RETURNING id
+         ), source_default AS (
+           INSERT INTO question_categories (section, part, parent_id, name, is_default)
+           SELECT 'reading', 5, id, '未细分', true FROM source_parent
+           RETURNING id
+         ), target_default AS (
+           INSERT INTO question_categories (section, part, parent_id, name, is_default)
+           SELECT 'reading', 5, id, '未细分', true FROM target_parent
+           RETURNING id
          ), source_same_name AS (
            INSERT INTO question_categories (section, part, parent_id, name)
            SELECT 'reading', 5, id, '同名子分类' FROM source_parent
@@ -208,6 +255,8 @@ describe('question review categories', () => {
          SELECT
            (SELECT id FROM source_parent) AS source_parent_id,
            (SELECT id FROM target_parent) AS target_parent_id,
+           (SELECT id FROM source_default) AS source_default_id,
+           (SELECT id FROM target_default) AS target_default_id,
            (SELECT id FROM source_same_name) AS source_same_name_id,
            (SELECT id FROM source_unique_name) AS source_unique_name_id,
            (SELECT id FROM target_same_name) AS target_same_name_id,
@@ -225,12 +274,14 @@ describe('question review categories', () => {
       await mergeCategory(client, ids.source_parent_id, ids.target_parent_id);
 
       const { rows } = await client.query(
-        `SELECT id, parent_id, status
+        `SELECT id, parent_id, name, is_default, status
          FROM question_categories
          WHERE id = ANY($1::int[])
          ORDER BY id`,
         [[
           ids.source_parent_id,
+          ids.source_default_id,
+          ids.target_default_id,
           ids.source_same_name_id,
           ids.source_unique_name_id,
           ids.target_same_name_id,
@@ -242,6 +293,60 @@ describe('question review categories', () => {
       expect(byId.get(ids.source_same_name_id)?.status).toBe('inactive');
       expect(byId.get(ids.source_unique_name_id)?.parent_id).toBe(ids.target_parent_id);
       expect(byId.get(ids.target_same_name_id)?.status).toBe('active');
+      expect(rows.filter((row) => row.parent_id === ids.target_parent_id && row.is_default))
+        .toEqual([expect.objectContaining({ id: ids.target_default_id, name: '未细分' })]);
     });
   }, 60_000);
+
+  it('returns 400, 404, and 409 from category routes', async () => {
+    const client = {
+      connect: vi.fn(),
+      end: vi.fn(),
+      query: vi.fn(),
+    };
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ createClient: () => client }));
+    const { PATCH, DELETE } = await import('@/app/api/question-categories/[id]/route');
+
+    const malformed = await PATCH(
+      new NextRequest('http://localhost/api/question-categories/not-a-number', {
+        method: 'PATCH',
+        body: '{}',
+      }),
+      { params: Promise.resolve({ id: 'not-a-number' }) },
+    );
+    expect(malformed.status).toBe(400);
+
+    client.query.mockResolvedValueOnce({ rows: [] });
+    const missing = await PATCH(
+      new NextRequest('http://localhost/api/question-categories/404', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: '不存在' }),
+      }),
+      { params: Promise.resolve({ id: '404' }) },
+    );
+    expect(missing.status).toBe(404);
+
+    client.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 405,
+          section: 'reading',
+          part: 5,
+          parent_id: 1,
+          name: '有题目分类',
+          is_default: false,
+          status: 'active',
+          sort_order: 0,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ has_questions: true, has_children: false }] });
+    const conflict = await DELETE(
+      new NextRequest('http://localhost/api/question-categories/405', { method: 'DELETE' }),
+      { params: Promise.resolve({ id: '405' }) },
+    );
+    expect(conflict.status).toBe(409);
+
+    vi.doUnmock('@/lib/db');
+  });
 });
