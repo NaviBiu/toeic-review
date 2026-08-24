@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { elapsedMs, normalizeEditedDuration } from '@/lib/questionReview/timing';
 import type { AttemptResult, QuestionOption, SessionQuestion } from '@/lib/questionReview/types';
 
@@ -15,6 +15,14 @@ const options: QuestionOption[] = ['A', 'B', 'C', 'D'];
 
 function formatSeconds(durationMs: number | null) {
   return durationMs === null ? '未记录' : (durationMs / 1000).toFixed(1) + ' 秒';
+}
+
+export function attemptStatsSummary(stats: Pick<AttemptResult['stats'], 'correctCount' | 'wrongCount'>) {
+  return `累计：正确 ${stats.correctCount}，错误 ${stats.wrongCount}`;
+}
+
+export function canAbandonTraining(isSubmitting: boolean) {
+  return !isSubmitting;
 }
 
 async function saveAttempt(sessionId: number, questionId: number, pending: PendingAttempt) {
@@ -34,12 +42,14 @@ function QuestionAttempt({
   isFinalQuestion,
   onSaved,
   onNext,
+  onSubmissionChange,
 }: {
   sessionId: number;
   question: SessionQuestion;
   isFinalQuestion: boolean;
   onSaved: (result: AttemptResult) => void;
   onNext: () => void;
+  onSubmissionChange: (isSubmitting: boolean) => void;
 }) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [pendingAttempt, setPendingAttempt] = useState<PendingAttempt | null>(null);
@@ -57,12 +67,15 @@ function QuestionAttempt({
 
   async function submit(pending: PendingAttempt) {
     setSaveError('');
+    onSubmissionChange(true);
     try {
       const result = await saveAttempt(sessionId, question.id, pending);
       setAttemptResult(result);
       onSaved(result);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : '作答保存失败，请重试');
+    } finally {
+      onSubmissionChange(false);
     }
   }
 
@@ -148,6 +161,7 @@ function QuestionAttempt({
             <p className={attemptResult.isCorrect ? 'text-sm font-semibold text-emerald-700' : 'text-sm font-semibold text-red-700'}>{attemptResult.isCorrect ? '回答正确' : '回答错误，正确答案是 ' + attemptResult.correctOption}</p>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-stone-600">
               <span>本次用时：{formatSeconds(attemptResult.durationMs)}</span>
+              <span>本题{attemptStatsSummary(attemptResult.stats)}</span>
               <button type="button" onClick={() => { setEditedDuration(attemptResult.durationMs === null ? '' : String(attemptResult.durationMs / 1000)); setEditingDuration(true); setTimingError(''); }} disabled={timingSaving} className="font-medium text-stone-800 hover:text-stone-500 disabled:text-stone-400">修改用时</button>
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={attemptResult.durationExcluded} onChange={(event) => void updateTiming(attemptResult.durationMs, event.target.checked)} disabled={timingSaving} className="h-4 w-4 rounded border-stone-300 text-stone-800 focus:ring-stone-500" />
@@ -179,13 +193,21 @@ function QuestionAttempt({
 export default function TrainingSession({ session, onExit }: { session: Session; onExit: () => void }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [outcomes, setOutcomes] = useState<Record<number, boolean>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const currentQuestion = session.questions[currentIndex];
   const answeredCount = Object.keys(outcomes).length;
   const correctCount = useMemo(() => Object.values(outcomes).filter(Boolean).length, [outcomes]);
   const wrongCount = answeredCount - correctCount;
 
   function abandon() {
+    if (isSubmittingRef.current || !canAbandonTraining(isSubmitting)) return;
     if (window.confirm('放弃本次训练？已保存的作答将保留。')) onExit();
+  }
+
+  function handleSubmissionChange(nextValue: boolean) {
+    isSubmittingRef.current = nextValue;
+    setIsSubmitting(nextValue);
   }
 
   if (!currentQuestion) return null;
@@ -201,7 +223,7 @@ export default function TrainingSession({ session, onExit }: { session: Session;
         <div className="flex items-center gap-4 text-sm">
           <span className="text-emerald-700">正确 {correctCount}</span>
           <span className="text-red-700">错误 {wrongCount}</span>
-          <button type="button" onClick={abandon} className="font-medium text-stone-600 hover:text-stone-950">放弃本次训练</button>
+          <button type="button" onClick={abandon} disabled={!canAbandonTraining(isSubmitting)} className="font-medium text-stone-600 hover:text-stone-950 disabled:cursor-not-allowed disabled:text-stone-300">放弃本次训练</button>
         </div>
       </div>
       <QuestionAttempt
@@ -210,6 +232,7 @@ export default function TrainingSession({ session, onExit }: { session: Session;
         question={currentQuestion}
         isFinalQuestion={isFinalQuestion}
         onSaved={(result) => setOutcomes((current) => ({ ...current, [currentQuestion.id]: result.isCorrect }))}
+        onSubmissionChange={handleSubmissionChange}
         onNext={() => {
           if (isFinalQuestion) onExit();
           else setCurrentIndex((index) => index + 1);

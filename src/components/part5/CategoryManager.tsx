@@ -5,6 +5,17 @@ import type { CategoryNode } from '@/lib/questionReview/types';
 
 type CategoryAction = 'rename' | 'move' | 'deactivate' | 'delete' | 'merge' | 'create';
 
+export function canMergeCategories(
+  source: Pick<CategoryNode, 'parentId'>,
+  target: Pick<CategoryNode, 'parentId'>,
+) {
+  return (source.parentId === null) === (target.parentId === null);
+}
+
+export function deleteConfirmationPhrase(name: string) {
+  return `删除“${name}”`;
+}
+
 function categoryLabel(category: CategoryNode) {
   return category.parentId === null ? category.name : category.name;
 }
@@ -40,6 +51,7 @@ export default function CategoryManager({
   const [mergeSourceId, setMergeSourceId] = useState<number | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState<number | null>(null);
   const [mergeConfirmation, setMergeConfirmation] = useState('');
+  const [deleteCandidate, setDeleteCandidate] = useState<CategoryNode | null>(null);
   const [busyAction, setBusyAction] = useState<CategoryAction | null>(null);
   const [error, setError] = useState('');
 
@@ -124,6 +136,7 @@ export default function CategoryManager({
     setError('');
     try {
       await requestCategory(`/api/question-categories/${id}`, { method: 'DELETE' });
+      setDeleteCandidate(null);
       await afterMutation();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '分类删除失败，请重试');
@@ -137,7 +150,7 @@ export default function CategoryManager({
       setError('请选择两个不同的分类');
       return;
     }
-    if (mergeSource.parentId !== mergeTarget.parentId) {
+    if (!canMergeCategories(mergeSource, mergeTarget)) {
       setError('只能合并同一层级的分类');
       return;
     }
@@ -206,7 +219,7 @@ export default function CategoryManager({
                 <button type="button" onClick={() => beginRename(category)} disabled={!mutable || busyAction !== null} className="text-stone-600 hover:text-stone-900 disabled:text-stone-300">重命名</button>
                 {category.parentId !== null ? <button type="button" onClick={() => { setMovingId(category.id); setMoveTargetId(category.parentId); }} disabled={!mutable || busyAction !== null} className="text-stone-600 hover:text-stone-900 disabled:text-stone-300">移动</button> : null}
                 <button type="button" onClick={() => void updateCategory(category.id, { status: category.status === 'active' ? 'inactive' : 'active' }, 'deactivate')} disabled={!mutable || busyAction !== null} className="text-stone-600 hover:text-stone-900 disabled:text-stone-300">{category.status === 'active' ? '停用' : '启用'}</button>
-                <button type="button" onClick={() => void deleteCategory(category.id)} disabled={!mutable || busyAction !== null} className="text-red-700 hover:text-red-900 disabled:text-stone-300">删除</button>
+                <button type="button" onClick={() => setDeleteCandidate(category)} disabled={!mutable || busyAction !== null} className="text-red-700 hover:text-red-900 disabled:text-stone-300">删除</button>
               </>
             )}
           </div>
@@ -246,6 +259,13 @@ export default function CategoryManager({
       </div>
 
       {error ? <p role="alert" className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
+      {deleteCandidate ? <div role="alertdialog" aria-labelledby="delete-category-title" className="mt-3 flex flex-wrap items-center justify-between gap-3 border-l-2 border-red-700 bg-red-50 px-3 py-3 text-sm text-red-900">
+        <p id="delete-category-title">确认{deleteConfirmationPhrase(deleteCandidate.name)}？此操作无法撤销。</p>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => void deleteCategory(deleteCandidate.id)} disabled={busyAction !== null} className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-800 disabled:bg-red-300">{deleteConfirmationPhrase(deleteCandidate.name)}</button>
+          <button type="button" onClick={() => setDeleteCandidate(null)} disabled={busyAction !== null} className="font-medium text-stone-700 hover:text-stone-950">取消</button>
+        </div>
+      </div> : null}
 
       <div className="mt-4 grid gap-4 md:grid-cols-[minmax(12rem,0.8fr)_minmax(0,1.2fr)]">
         <div className="border border-stone-200 bg-white">
