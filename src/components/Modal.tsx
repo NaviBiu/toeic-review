@@ -6,12 +6,22 @@ export default function Modal({
   onClose,
   title,
   children,
+  size = 'md',
+  compact = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg';
+  compact?: boolean;
 }) {
+  const widthClass = {
+    sm: 'max-w-sm',
+    md: 'max-w-md',
+    lg: 'max-w-3xl',
+  }[size];
+
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
@@ -29,7 +39,7 @@ export default function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+        className={`max-h-[90vh] w-full ${widthClass} overflow-y-auto ${compact ? 'rounded-md' : 'rounded-2xl'} bg-white p-6 shadow-xl`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-stone-900">{title}</h2>

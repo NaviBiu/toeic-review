@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { CategoryNode, CreateSessionInput, SessionQuestion } from '@/lib/questionReview/types';
+import type { CategoryNode, CreateSessionInput, QuestionListItem, SessionQuestion } from '@/lib/questionReview/types';
+import QuestionEditorModal from './QuestionEditorModal';
+import QuestionLibrary from './QuestionLibrary';
 import TrainingSetup from './TrainingSetup';
 
 type WorkspaceTab = 'library' | 'categories' | 'training';
@@ -56,13 +58,12 @@ function CategoryRows({ categories }: { categories: CategoryNode[] }) {
 export default function Part5Workspace() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('library');
   const [categoryRefreshVersion, setCategoryRefreshVersion] = useState(0);
-  const [createQuestionId, setCreateQuestionId] = useState<number | null>(null);
-  const [editQuestionId, setEditQuestionId] = useState<number | null>(null);
+  const [editorQuestion, setEditorQuestion] = useState<QuestionListItem | null | undefined>(undefined);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [categoriesState, setCategoriesState] = useState<CategoryLoadState>({ status: 'loading' });
   const [starting, setStarting] = useState(false);
   const [sessionError, setSessionError] = useState('');
-  const editorQuestionId = createQuestionId ?? editQuestionId;
+  const editorOpen = editorQuestion !== undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -102,8 +103,6 @@ export default function Part5Workspace() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? '训练创建失败，请重试');
-      setCreateQuestionId(null);
-      setEditQuestionId(null);
       setActiveSession(body as Session);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : '训练创建失败，请重试');
@@ -115,6 +114,18 @@ export default function Part5Workspace() {
   function retryCategories() {
     setCategoriesState({ status: 'loading' });
     setCategoryRefreshVersion((version) => version + 1);
+  }
+
+  function openEditor(question: QuestionListItem | null) {
+    setEditorQuestion(question);
+  }
+
+  function closeEditor() {
+    setEditorQuestion(undefined);
+  }
+
+  function handleQuestionChanged() {
+    retryCategories();
   }
 
   return (
@@ -168,14 +179,7 @@ export default function Part5Workspace() {
           </div>
         ) : null}
         {categoriesState.status === 'ready' && activeTab === 'library' ? (
-          <div>
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-base font-semibold text-stone-900">错题库概览</h2>
-              <p className="text-sm text-stone-500">按分类查看当前题量与最近表现</p>
-            </div>
-            {editorQuestionId !== null ? <p className="mb-3 text-sm text-stone-600">正在编辑题目 #{editorQuestionId}</p> : null}
-            <CategoryRows categories={categoriesState.categories} />
-          </div>
+          <QuestionLibrary categories={categoriesState.categories} refreshVersion={categoryRefreshVersion} onEdit={openEditor} onChanged={handleQuestionChanged} />
         ) : null}
         {categoriesState.status === 'ready' && activeTab === 'categories' ? (
           <div>
@@ -193,6 +197,7 @@ export default function Part5Workspace() {
           </div>
         ) : null}
       </section>
+      {categoriesState.status === 'ready' && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={categoriesState.categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
     </div>
   );
 }
