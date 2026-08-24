@@ -8,16 +8,21 @@ import TrainingSetup from './TrainingSetup';
 
 type WorkspaceTab = 'library' | 'categories' | 'training';
 type Session = { id: number; actualCount: number; questions: SessionQuestion[] };
-type CategoryLoadState =
-  | { status: 'loading' }
-  | { status: 'ready'; categories: CategoryNode[] }
-  | { status: 'error'; message: string };
+type CategoryLoadState = {
+  categories: CategoryNode[] | null;
+  initialLoading: boolean;
+  error: string;
+};
 
 const tabs: { id: WorkspaceTab; label: string }[] = [
   { id: 'library', label: '错题库' },
   { id: 'categories', label: '分类管理' },
   { id: 'training', label: '训练设置' },
 ];
+
+export function beginCategoryRefresh(categories: CategoryNode[] | null): CategoryLoadState {
+  return { categories, initialLoading: categories === null, error: '' };
+}
 
 function aggregateCategories(categories: CategoryNode[]) {
   return categories.reduce((stats, category) => ({
@@ -58,38 +63,40 @@ function CategoryRows({ categories }: { categories: CategoryNode[] }) {
 export default function Part5Workspace() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('library');
   const [categoryRefreshVersion, setCategoryRefreshVersion] = useState(0);
+  const [questionRefreshVersion, setQuestionRefreshVersion] = useState(0);
   const [editorQuestion, setEditorQuestion] = useState<QuestionListItem | null | undefined>(undefined);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [categoriesState, setCategoriesState] = useState<CategoryLoadState>({ status: 'loading' });
+  const [categoriesState, setCategoriesState] = useState<CategoryLoadState>(() => beginCategoryRefresh(null));
   const [starting, setStarting] = useState(false);
   const [sessionError, setSessionError] = useState('');
   const editorOpen = editorQuestion !== undefined;
 
   useEffect(() => {
-    let cancelled = false;
-    fetch('/api/question-categories?section=reading&part=5')
+    const controller = new AbortController();
+    fetch('/api/question-categories?section=reading&part=5', { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error ?? '分类加载失败，请重试');
         return body as CategoryNode[];
       })
       .then((categories) => {
-        if (!cancelled) setCategoriesState({ status: 'ready', categories });
+        if (!controller.signal.aborted) setCategoriesState({ categories, initialLoading: false, error: '' });
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
-          setCategoriesState({
-            status: 'error',
-            message: error instanceof Error ? error.message : '分类加载失败，请重试',
-          });
-        }
+        if (controller.signal.aborted) return;
+        setCategoriesState((current) => ({
+          categories: current.categories,
+          initialLoading: false,
+          error: error instanceof Error ? error.message : '分类加载失败，请重试',
+        }));
       });
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [categoryRefreshVersion]);
 
+  const categories = categoriesState.categories;
   const summary = useMemo(
-    () => categoriesState.status === 'ready' ? aggregateCategories(categoriesState.categories) : null,
-    [categoriesState],
+    () => categories ? aggregateCategories(categories) : null,
+    [categories],
   );
 
   async function startTraining(input: CreateSessionInput) {
@@ -111,8 +118,8 @@ export default function Part5Workspace() {
     }
   }
 
-  function retryCategories() {
-    setCategoriesState({ status: 'loading' });
+  function refreshCategories() {
+    setCategoriesState((current) => beginCategoryRefresh(current.categories));
     setCategoryRefreshVersion((version) => version + 1);
   }
 
@@ -125,7 +132,8 @@ export default function Part5Workspace() {
   }
 
   function handleQuestionChanged() {
-    retryCategories();
+    setQuestionRefreshVersion((version) => version + 1);
+    refreshCategories();
   }
 
   return (
@@ -171,33 +179,34 @@ export default function Part5Workspace() {
       </div>
 
       <section className="pt-5" role="tabpanel">
-        {categoriesState.status === 'loading' ? <p className="py-10 text-sm text-stone-500">正在加载 Part 5 分类和统计…</p> : null}
-        {categoriesState.status === 'error' ? (
+        {categoriesState.initialLoading ? <p className="py-10 text-sm text-stone-500">正在加载 Part 5 分类和统计…</p> : null}
+        {!categories && categoriesState.error ? (
           <div className="flex flex-wrap items-center gap-3 border-l-2 border-red-600 bg-red-50 px-3 py-3 text-sm text-red-800">
-            <p>{categoriesState.message}</p>
-            <button type="button" onClick={retryCategories} className="rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-100">重试</button>
+            <p>{categoriesState.error}</p>
+            <button type="button" onClick={refreshCategories} className="rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-100">重试</button>
           </div>
         ) : null}
-        {categoriesState.status === 'ready' && activeTab === 'library' ? (
-          <QuestionLibrary categories={categoriesState.categories} refreshVersion={categoryRefreshVersion} onEdit={openEditor} onChanged={handleQuestionChanged} />
+        {categories && categoriesState.error ? <p className="mb-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{categoriesState.error}</p> : null}
+        {categories && activeTab === 'library' ? (
+          <QuestionLibrary categories={categories} refreshVersion={questionRefreshVersion} onEdit={openEditor} onChanged={handleQuestionChanged} />
         ) : null}
-        {categoriesState.status === 'ready' && activeTab === 'categories' ? (
+        {categories && activeTab === 'categories' ? (
           <div>
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-base font-semibold text-stone-900">分类管理</h2>
-              <button type="button" onClick={retryCategories} className="text-sm font-medium text-stone-600 hover:text-stone-900">刷新</button>
+              <button type="button" onClick={refreshCategories} className="text-sm font-medium text-stone-600 hover:text-stone-900">刷新</button>
             </div>
-            <CategoryRows categories={categoriesState.categories} />
+            <CategoryRows categories={categories} />
           </div>
         ) : null}
-        {categoriesState.status === 'ready' && activeTab === 'training' ? (
+        {categories && activeTab === 'training' ? (
           <div>
-            <TrainingSetup categories={categoriesState.categories} onStart={startTraining} starting={starting} />
+            <TrainingSetup categories={categories} onStart={startTraining} starting={starting} />
             {sessionError ? <p className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{sessionError}</p> : null}
           </div>
         ) : null}
       </section>
-      {categoriesState.status === 'ready' && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={categoriesState.categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
+      {categories && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
     </div>
   );
 }

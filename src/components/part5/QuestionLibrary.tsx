@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CategoryNode, QuestionListItem, QuestionStatus } from '@/lib/questionReview/types';
 
 const PAGE_SIZE = 20;
@@ -49,6 +49,14 @@ export function buildQuestionListQuery(filters: LibraryFilters) {
 
 export function formatAttemptDuration(durationMs: number | null) {
   return durationMs === null ? '—' : `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+export function shouldApplyQuestionListResponse(
+  signal: AbortSignal,
+  requestId: number,
+  latestRequestId: number,
+) {
+  return !signal.aborted && requestId === latestRequestId;
 }
 
 function categoryChoices(categories: CategoryNode[]): CategoryChoice[] {
@@ -147,6 +155,7 @@ export default function QuestionLibrary({
   const [items, setItems] = useState<QuestionListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [changingId, setChangingId] = useState<number | null>(null);
+  const latestRequestId = useRef(0);
 
   const choices = useMemo(() => categoryChoices(categories), [categories]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -156,28 +165,34 @@ export default function QuestionLibrary({
     return () => window.clearTimeout(timeout);
   }, [search]);
 
-  async function loadQuestions(controller: AbortController, filters: LibraryFilters) {
+  async function loadQuestions(controller: AbortController, filters: LibraryFilters, requestId: number) {
+    if (!shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) return;
     setLoading(true);
     setLoadError('');
     try {
       const response = await fetch(`/api/review-questions?${buildQuestionListQuery(filters)}`, { signal: controller.signal });
+      if (!shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) return;
       const body = await response.json().catch(() => ({}));
+      if (!shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) return;
       if (!response.ok) throw new Error(body.error ?? '题目加载失败，请重试');
       const result = body as { items: QuestionListItem[]; total: number };
+      if (!shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) return;
       setItems(result.items);
       setTotal(result.total);
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (!shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) return;
       setLoadError(error instanceof Error ? error.message : '题目加载失败，请重试');
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (shouldApplyQuestionListResponse(controller.signal, requestId, latestRequestId.current)) setLoading(false);
     }
   }
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestId = latestRequestId.current + 1;
+    latestRequestId.current = requestId;
     const filters: LibraryFilters = { search: debouncedSearch, categoryId, status, sort, page };
-    const request = window.setTimeout(() => { void loadQuestions(controller, filters); }, 0);
+    const request = window.setTimeout(() => { void loadQuestions(controller, filters, requestId); }, 0);
 
     return () => {
       window.clearTimeout(request);
