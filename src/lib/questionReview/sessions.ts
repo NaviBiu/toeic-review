@@ -40,13 +40,15 @@ type SessionScopeRow = {
 
 type AttemptRow = {
   id: number | string;
+  session_id: number | string;
+  question_id: number | string;
+  selected_option: QuestionOption;
   is_correct: boolean;
   correct_option: QuestionOption;
   analysis: string;
   notes: string | null;
   duration_ms: number | string | null;
   duration_excluded: boolean;
-  question_id: number | string;
 };
 
 export type SubmitAttemptInput = {
@@ -262,7 +264,8 @@ async function findSessionQuestion(
 async function findAttempt(client: VercelClient, attemptId: number): Promise<AttemptRow> {
   const { rows } = await client.query(
     `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.duration_excluded,
-       attempt.question_id, question.correct_option, question.analysis, question.notes
+       attempt.session_id, attempt.question_id, attempt.selected_option,
+       question.correct_option, question.analysis, question.notes
      FROM question_attempts attempt
      JOIN review_questions question ON question.id = attempt.question_id
      WHERE attempt.id = $1`,
@@ -276,7 +279,8 @@ async function findAttempt(client: VercelClient, attemptId: number): Promise<Att
 async function findAttemptByRequestId(client: VercelClient, requestId: string): Promise<AttemptRow> {
   const { rows } = await client.query(
     `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.duration_excluded,
-       attempt.question_id, question.correct_option, question.analysis, question.notes
+       attempt.session_id, attempt.question_id, attempt.selected_option,
+       question.correct_option, question.analysis, question.notes
      FROM question_attempts attempt
      JOIN review_questions question ON question.id = attempt.question_id
      WHERE attempt.request_id = $1`,
@@ -285,6 +289,14 @@ async function findAttemptByRequestId(client: VercelClient, requestId: string): 
   const attempt = rows[0] as AttemptRow | undefined;
   if (!attempt) throw new SessionError('作答记录不存在', 'not_found');
   return attempt;
+}
+
+function matchesAttemptPayload(attempt: AttemptRow, input: SubmitAttemptInput): boolean {
+  const storedDuration = attempt.duration_ms === null ? null : Number(attempt.duration_ms);
+  return Number(attempt.session_id) === input.sessionId
+    && Number(attempt.question_id) === input.questionId
+    && attempt.selected_option === input.selectedOption
+    && storedDuration === input.durationMs;
 }
 
 async function findStats(client: VercelClient, questionId: number): Promise<QuestionStats> {
@@ -346,7 +358,11 @@ export async function submitAttempt(client: VercelClient, input: SubmitAttemptIn
     [input.requestId, input.sessionId, input.questionId, input.selectedOption,
       input.selectedOption === question.correctOption, input.durationMs],
   );
-  return toAttemptResult(client, await findAttemptByRequestId(client, input.requestId));
+  const storedAttempt = await findAttemptByRequestId(client, input.requestId);
+  if (!matchesAttemptPayload(storedAttempt, input)) {
+    throw new SessionError('请求标识已用于其他作答', 'conflict');
+  }
+  return toAttemptResult(client, storedAttempt);
 }
 
 export async function updateAttemptTiming(

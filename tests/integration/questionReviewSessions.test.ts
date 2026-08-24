@@ -75,6 +75,63 @@ describe('question review sessions', () => {
       );
       expect(count.count).toBe(1);
 
+      const otherQuestionId = session.questions.find((item) => item.id !== ids.first_question_id)!.id;
+      await expect(submitAttempt(client, {
+        requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
+        sessionId: session.id,
+        questionId: ids.first_question_id,
+        selectedOption: 'B',
+        durationMs: 9000,
+      })).rejects.toThrow('请求标识已用于其他作答');
+      await expect(submitAttempt(client, {
+        requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
+        sessionId: session.id,
+        questionId: ids.first_question_id,
+        selectedOption: 'A',
+        durationMs: 9001,
+      })).rejects.toThrow('请求标识已用于其他作答');
+      await expect(submitAttempt(client, {
+        requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
+        sessionId: session.id,
+        questionId: otherQuestionId,
+        selectedOption: 'A',
+        durationMs: 9000,
+      })).rejects.toThrow('请求标识已用于其他作答');
+      const secondSession = await createReviewSession(client, {
+        mode: 'random', categoryScopeId: ids.parent_id, includeMastered: false, plannedCount: 10,
+      });
+      await expect(submitAttempt(client, {
+        requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
+        sessionId: secondSession.id,
+        questionId: ids.first_question_id,
+        selectedOption: 'A',
+        durationMs: 9000,
+      })).rejects.toThrow('请求标识已用于其他作答');
+
+      const concurrent = await Promise.allSettled([
+        submitAttempt(client, {
+          requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00103',
+          sessionId: session.id,
+          questionId: ids.first_question_id,
+          selectedOption: 'A',
+          durationMs: 1000,
+        }),
+        submitAttempt(client, {
+          requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00103',
+          sessionId: session.id,
+          questionId: ids.first_question_id,
+          selectedOption: 'B',
+          durationMs: 1000,
+        }),
+      ]);
+      expect(concurrent.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(concurrent.filter((result) => result.status === 'rejected')).toHaveLength(1);
+      const { rows: [concurrentCount] } = await client.query(
+        'SELECT COUNT(*)::int AS count FROM question_attempts WHERE request_id = $1',
+        ['4f21de2e-e7a5-4b72-9425-c3086fa00103'],
+      );
+      expect(concurrentCount.count).toBe(1);
+
       const changedDuration = await updateAttemptTiming(client, attempt.attemptId, {
         durationMs: 12500,
         durationExcluded: false,

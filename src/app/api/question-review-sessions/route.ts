@@ -14,17 +14,18 @@ function sessionErrorResponse(error: unknown) {
 function parseInput(body: unknown): CreateSessionInput | null {
   if (!body || typeof body !== 'object') return null;
   const value = body as Record<string, unknown>;
+  const includeMastered = value.includeMastered === undefined ? false : value.includeMastered;
   if (!['weak_first', 'random'].includes(value.mode as TrainingMode)
     || (value.categoryScopeId !== null
       && (!Number.isInteger(value.categoryScopeId) || (value.categoryScopeId as number) <= 0))
-    || typeof value.includeMastered !== 'boolean'
+    || typeof includeMastered !== 'boolean'
     || !Number.isInteger(value.plannedCount)) {
     return null;
   }
   return {
     mode: value.mode as TrainingMode,
     categoryScopeId: value.categoryScopeId as number | null,
-    includeMastered: value.includeMastered,
+    includeMastered,
     plannedCount: Math.min(100, Math.max(1, value.plannedCount as number)),
   };
 }
