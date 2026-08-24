@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CategoryNode, CreateSessionInput, QuestionListItem, SessionQuestion } from '@/lib/questionReview/types';
+import CategoryManager from './CategoryManager';
 import QuestionEditorModal from './QuestionEditorModal';
 import QuestionLibrary from './QuestionLibrary';
 import TrainingSetup from './TrainingSetup';
+import TrainingSession from './TrainingSession';
 
 type WorkspaceTab = 'library' | 'categories' | 'training';
 type Session = { id: number; actualCount: number; questions: SessionQuestion[] };
@@ -35,29 +37,6 @@ function aggregateCategories(categories: CategoryNode[]) {
 
 function formatAccuracy(latestCorrect: number, attempted: number) {
   return attempted === 0 ? '—' : `${Math.round((latestCorrect / attempted) * 100)}%`;
-}
-
-function CategoryRows({ categories }: { categories: CategoryNode[] }) {
-  return (
-    <div className="divide-y divide-stone-200 border border-stone-200 bg-white">
-      {categories.map((category) => (
-        <div key={category.id}>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 px-4 py-3 text-sm">
-            <span className="font-medium text-stone-900">{category.name}</span>
-            <span className="text-stone-500">{category.stats.total} 题</span>
-            <span className="font-mono text-xs text-stone-500">{formatAccuracy(category.stats.latestCorrect, category.stats.attempted)}</span>
-          </div>
-          {category.children.map((child) => (
-            <div key={child.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 border-t border-stone-100 bg-stone-50 px-4 py-2.5 text-sm">
-              <span className="pl-4 text-stone-700">{child.name}</span>
-              <span className="text-stone-500">{child.stats.total} 题</span>
-              <span className="font-mono text-xs text-stone-500">{formatAccuracy(child.stats.latestCorrect, child.stats.attempted)}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
 }
 
 export default function Part5Workspace() {
@@ -136,6 +115,11 @@ export default function Part5Workspace() {
     refreshCategories();
   }
 
+  function exitTraining() {
+    setActiveSession(null);
+    handleQuestionChanged();
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-7 sm:px-6 sm:py-9">
       <header className="border-b border-stone-300 pb-5">
@@ -144,7 +128,7 @@ export default function Part5Workspace() {
             <p className="font-mono text-[11px] font-medium uppercase tracking-wide text-stone-500">Reading / Part 5</p>
             <h1 className="mt-1 text-xl font-semibold text-stone-900">语法与词汇训练</h1>
           </div>
-          {activeSession ? <p className="text-sm text-emerald-700">训练已创建：{activeSession.actualCount} 题</p> : null}
+          {activeSession ? <p className="text-sm text-emerald-700">训练中：{activeSession.actualCount} 题</p> : null}
         </div>
         <dl className="mt-5 grid grid-cols-2 divide-x divide-y divide-stone-200 border border-stone-200 bg-white sm:grid-cols-4">
           {[
@@ -161,51 +145,45 @@ export default function Part5Workspace() {
         </dl>
       </header>
 
-      <div className="mt-5 border-b border-stone-300" role="tablist" aria-label="Part 5 工作区">
-        <div className="flex gap-5 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 border-b-2 px-1 pb-3 text-sm font-medium ${activeTab === tab.id ? 'border-stone-800 text-stone-900' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {activeSession ? <section className="pt-5"><TrainingSession session={activeSession} onExit={exitTraining} /></section> : <>
+        <div className="mt-5 border-b border-stone-300" role="tablist" aria-label="Part 5 工作区">
+          <div className="flex gap-5 overflow-x-auto">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`shrink-0 border-b-2 px-1 pb-3 text-sm font-medium ${activeTab === tab.id ? 'border-stone-800 text-stone-900' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <section className="pt-5" role="tabpanel">
-        {categoriesState.initialLoading ? <p className="py-10 text-sm text-stone-500">正在加载 Part 5 分类和统计…</p> : null}
-        {!categories && categoriesState.error ? (
-          <div className="flex flex-wrap items-center gap-3 border-l-2 border-red-600 bg-red-50 px-3 py-3 text-sm text-red-800">
-            <p>{categoriesState.error}</p>
-            <button type="button" onClick={refreshCategories} className="rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-100">重试</button>
-          </div>
-        ) : null}
-        {categories && categoriesState.error ? <p className="mb-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{categoriesState.error}</p> : null}
-        {categories && activeTab === 'library' ? (
-          <QuestionLibrary categories={categories} refreshVersion={questionRefreshVersion} onEdit={openEditor} onChanged={handleQuestionChanged} />
-        ) : null}
-        {categories && activeTab === 'categories' ? (
-          <div>
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-base font-semibold text-stone-900">分类管理</h2>
-              <button type="button" onClick={refreshCategories} className="text-sm font-medium text-stone-600 hover:text-stone-900">刷新</button>
+        <section className="pt-5" role="tabpanel">
+          {categoriesState.initialLoading ? <p className="py-10 text-sm text-stone-500">正在加载 Part 5 分类和统计…</p> : null}
+          {!categories && categoriesState.error ? (
+            <div className="flex flex-wrap items-center gap-3 border-l-2 border-red-600 bg-red-50 px-3 py-3 text-sm text-red-800">
+              <p>{categoriesState.error}</p>
+              <button type="button" onClick={refreshCategories} className="rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-100">重试</button>
             </div>
-            <CategoryRows categories={categories} />
-          </div>
-        ) : null}
-        {categories && activeTab === 'training' ? (
-          <div>
-            <TrainingSetup categories={categories} onStart={startTraining} starting={starting} />
-            {sessionError ? <p className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{sessionError}</p> : null}
-          </div>
-        ) : null}
-      </section>
+          ) : null}
+          {categories && categoriesState.error ? <p className="mb-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{categoriesState.error}</p> : null}
+          {categories && activeTab === 'library' ? (
+            <QuestionLibrary categories={categories} refreshVersion={questionRefreshVersion} onEdit={openEditor} onChanged={handleQuestionChanged} />
+          ) : null}
+          {categories && activeTab === 'categories' ? <CategoryManager categories={categories} onChanged={handleQuestionChanged} /> : null}
+          {categories && activeTab === 'training' ? (
+            <div>
+              <TrainingSetup categories={categories} onStart={startTraining} starting={starting} />
+              {sessionError ? <p className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{sessionError}</p> : null}
+            </div>
+          ) : null}
+        </section>
+      </>}
       {categories && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
     </div>
   );
