@@ -50,6 +50,7 @@ export const workReviewCopy = {
 export const studyNav = [
   { href: '/review', label: '今日复盘' },
   { href: '/knowledge-points', label: '错题库' },
+  { href: '/reading/part5', label: '阅读训练' },
   { href: '/knowledge-points/import', label: '导入笔记' },
   { href: '/mastered', label: '已掌握' },
   { href: '/mock-exams', label: '模考记录' },
@@ -68,6 +69,7 @@ export const workModeNav = [
 const sectionTitles: Record<string, string> = {
   '/review': 'Daily Review Requirements',
   '/knowledge-points': 'Issue Library Requirements',
+  '/reading/part5': 'Reading Review Requirements',
   '/knowledge-points/import': 'Import Brief Requirements',
   '/mastered': 'Resolved Items Requirements',
   '/mock-exams': 'Progress Metrics Requirements',
