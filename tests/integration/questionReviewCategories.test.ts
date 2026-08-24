@@ -167,10 +167,22 @@ describe('question review categories', () => {
          ), attempts AS (
            INSERT INTO question_attempts
              (request_id, session_id, question_id, selected_option, is_correct, attempted_at)
-           SELECT '14111111-1111-4111-8111-111111111111'::uuid, session_id, question_id, 'B', false, '2026-08-20T08:00:00Z'
+           SELECT
+             '14111111-1111-4111-8111-111111111111'::uuid,
+             session_id,
+             question_id,
+             'B'::text,
+             false,
+             '2026-08-20T08:00:00Z'::timestamptz
            FROM session_item
            UNION ALL
-           SELECT '24222222-2222-4222-8222-222222222222'::uuid, session_id, question_id, 'A', true, '2026-08-20T08:00:00Z'
+           SELECT
+             '24222222-2222-4222-8222-222222222222'::uuid,
+             session_id,
+             question_id,
+             'A'::text,
+             true,
+             '2026-08-20T08:00:00Z'::timestamptz
            FROM session_item
          )
          SELECT
