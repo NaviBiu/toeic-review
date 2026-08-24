@@ -104,7 +104,7 @@ describe('schema constraints', () => {
 
   it('rejects duplicate question attempt request ids', async () => {
     await withTestClient(async (client) => {
-      const requestId = '85ed0afc-2f4a-4405-8818-91418e2e15c';
+      const requestId = '85ed0afc-2f4a-4405-8818-91418e2e15cd';
       const { rows: [attempt] } = await client.query(
         `WITH category AS (
            SELECT id FROM question_categories
