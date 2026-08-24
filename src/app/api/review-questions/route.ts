@@ -90,13 +90,27 @@ export async function POST(req: NextRequest) {
 
   const client = createClient();
   await client.connect();
+  let transactionOpen = false;
   try {
+    await client.query('BEGIN');
+    transactionOpen = true;
     const result = await createQuestion(client, body);
     if (result.duplicate) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
       return NextResponse.json({ error: '检测到相同题干', duplicateId: result.duplicateId }, { status: 409 });
     }
+    await client.query('COMMIT');
+    transactionOpen = false;
     return NextResponse.json(result.question, { status: 201 });
   } catch (error) {
+    if (transactionOpen) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve the original mutation error if rollback also fails.
+      }
+    }
     return questionErrorResponse(error);
   } finally {
     await client.end();

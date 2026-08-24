@@ -34,6 +34,9 @@ type CategoryRow = {
   parent_id: number | null;
   status: 'active' | 'inactive';
   parent_status: 'active' | 'inactive' | null;
+  parent_section: 'reading' | null;
+  parent_part: 5 | 6 | 7 | null;
+  parent_parent_id: number | null;
 };
 
 export class QuestionError extends Error {
@@ -110,6 +113,8 @@ function trimOptional(value: string | null | undefined): string | null {
 function validateInput(input: ReviewQuestionInput): Required<Omit<ReviewQuestionInput, 'confirmDuplicate'>> {
   const stem = input.stem.trim();
   if (!stem) throw new QuestionError('题干不能为空', 'invalid');
+  const analysis = input.analysis.trim();
+  if (!analysis) throw new QuestionError('考点分析不能为空', 'invalid');
 
   const options = {} as Record<QuestionOption, string>;
   for (const option of questionOptions) {
@@ -130,7 +135,7 @@ function validateInput(input: ReviewQuestionInput): Required<Omit<ReviewQuestion
     stem,
     options,
     correctOption: input.correctOption,
-    analysis: input.analysis.trim(),
+    analysis,
     notes: trimOptional(input.notes),
     source: trimOptional(input.source),
     categoryId: input.categoryId,
@@ -140,7 +145,9 @@ function validateInput(input: ReviewQuestionInput): Required<Omit<ReviewQuestion
 
 async function validateCategory(client: VercelClient, categoryId: number): Promise<void> {
   const { rows } = await client.query(
-    `SELECT category.*, parent.status AS parent_status
+    `SELECT category.*, parent.status AS parent_status,
+       parent.section AS parent_section, parent.part AS parent_part,
+       parent.parent_id AS parent_parent_id
      FROM question_categories category
      LEFT JOIN question_categories parent ON parent.id = category.parent_id
      WHERE category.id = $1`,
@@ -152,9 +159,24 @@ async function validateCategory(client: VercelClient, categoryId: number): Promi
   if (category.section !== 'reading' || category.part !== 5) {
     throw new QuestionError('分类范围不一致', 'conflict');
   }
+  if (category.parent_parent_id !== null) {
+    throw new QuestionError('题目必须归属二级分类', 'conflict');
+  }
+  if (category.parent_section !== category.section || category.parent_part !== category.part) {
+    throw new QuestionError('分类范围不一致', 'conflict');
+  }
   if (category.status !== 'active' || category.parent_status !== 'active') {
     throw new QuestionError('分类已停用', 'conflict');
   }
+}
+
+async function lockDuplicateStem(client: VercelClient, stem: string): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(
+       hashtext(lower(regexp_replace(trim($1), '\\s+', ' ', 'g')))
+     )`,
+    [stem],
+  );
 }
 
 async function findDuplicate(
@@ -186,6 +208,7 @@ export async function createQuestion(
 ): Promise<QuestionSaveResult> {
   const values = validateInput(input);
   await validateCategory(client, values.categoryId);
+  await lockDuplicateStem(client, values.stem);
   const duplicateId = await findDuplicate(client, values.stem);
   if (duplicateId !== null && !input.confirmDuplicate) {
     return { duplicate: true, duplicateId };

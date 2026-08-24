@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { VercelClient } from '@vercel/postgres';
 import {
@@ -26,6 +27,9 @@ const activeChild = {
   status: 'active',
   sort_order: 0,
   parent_status: 'active',
+  parent_section: 'reading',
+  parent_part: 5,
+  parent_parent_id: null,
 };
 
 const currentQuestion = {
@@ -57,6 +61,7 @@ describe('question validation', () => {
     [{ ...input, stem: '   ' }, '题干不能为空'],
     [{ ...input, options: { ...input.options, C: ' ' } }, 'A/B/C/D 选项不能为空'],
     [{ ...input, correctOption: 'E' as 'A' }, '正确答案不正确'],
+    [{ ...input, analysis: '  ' }, '考点分析不能为空'],
   ])('rejects invalid fields with %s', async (invalidInput, message) => {
     const client = clientWith();
     await expect(createQuestion(client, invalidInput)).rejects.toEqual(
@@ -69,6 +74,8 @@ describe('question validation', () => {
     [{ ...activeChild, status: 'inactive' }, '分类已停用'],
     [{ ...activeChild, parent_id: null }, '题目必须归属二级分类'],
     [{ ...activeChild, part: 6 }, '分类范围不一致'],
+    [{ ...activeChild, parent_parent_id: 1 }, '题目必须归属二级分类'],
+    [{ ...activeChild, parent_part: 6 }, '分类范围不一致'],
   ])('rejects an invalid question category with %s', async (category, message) => {
     await expect(createQuestion(clientWith([category]), input)).rejects.toEqual(
       expect.objectContaining<QuestionError>({ message }),
@@ -83,15 +90,28 @@ describe('question validation', () => {
       expect.objectContaining<QuestionError>({ message: '分类已停用' }),
     );
   });
+
+  it('rejects blank analysis when patching a question', async () => {
+    await expect(updateQuestion(clientWith(
+      [currentQuestion],
+      [activeChild],
+    ), currentQuestion.id, { analysis: ' ' })).rejects.toEqual(
+      expect.objectContaining<QuestionError>({ message: '考点分析不能为空' }),
+    );
+  });
 });
 
 describe('question repository', () => {
   it('returns a duplicate result until confirmation is supplied', async () => {
-    const duplicate = await createQuestion(clientWith([activeChild], [{ id: 33 }]), input);
+    const duplicateClient = clientWith([activeChild], [], [{ id: 33 }]);
+    const duplicate = await createQuestion(duplicateClient, input);
     expect(duplicate).toEqual({ duplicate: true, duplicateId: 33 });
+    expect(vi.mocked(duplicateClient.query).mock.calls[1][0]).toContain('pg_advisory_xact_lock');
+    expect(vi.mocked(duplicateClient.query).mock.calls[2][0]).toContain('SELECT id FROM review_questions');
 
     const confirmed = await createQuestion(clientWith(
       [activeChild],
+      [],
       [{ id: 33 }],
       [{
         id: 34,
@@ -112,6 +132,60 @@ describe('question repository', () => {
       }],
     ), { ...input, confirmDuplicate: true });
     expect(confirmed).toMatchObject({ duplicate: false, question: { id: 34, status: 'learning' } });
+  });
+
+  it('commits a saved POST and rolls back duplicate, conflict, and unexpected POST failures', async () => {
+    const client = { connect: vi.fn(), end: vi.fn(), query: vi.fn() };
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ createClient: () => client }));
+    const { POST } = await import('@/app/api/review-questions/route');
+
+    client.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [activeChild] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 66 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const created = await POST(new NextRequest('http://localhost/api/review-questions', {
+      method: 'POST', body: JSON.stringify(input),
+    }));
+    expect(created.status).toBe(201);
+    expect(vi.mocked(client.query).mock.calls.map(([sql]) => sql)).toEqual(expect.arrayContaining([
+      'BEGIN', 'COMMIT',
+    ]));
+
+    client.query.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [activeChild] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 33 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const duplicate = await POST(new NextRequest('http://localhost/api/review-questions', {
+      method: 'POST', body: JSON.stringify(input),
+    }));
+    expect(duplicate.status).toBe(409);
+    expect(vi.mocked(client.query).mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+
+    client.query.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...activeChild, status: 'inactive' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const conflict = await POST(new NextRequest('http://localhost/api/review-questions', {
+      method: 'POST', body: JSON.stringify(input),
+    }));
+    expect(conflict.status).toBe(409);
+    expect(vi.mocked(client.query).mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+
+    client.query.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(POST(new NextRequest('http://localhost/api/review-questions', {
+      method: 'POST', body: JSON.stringify(input),
+    }))).rejects.toThrow('database unavailable');
+    expect(vi.mocked(client.query).mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    vi.doUnmock('@/lib/db');
   });
 
   it('returns paginated list rows with attempt aggregates and the requested sort', async () => {
