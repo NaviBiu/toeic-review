@@ -2,6 +2,108 @@ import { describe, it, expect } from 'vitest';
 import { withTestClient } from './setup';
 
 describe('schema constraints', () => {
+  it('seeds six active Part 5 category trees with default children', async () => {
+    await withTestClient(async (client) => {
+      const { rows } = await client.query(
+        `SELECT parent.id, parent.name, child.id AS default_child_id
+         FROM question_categories parent
+         JOIN question_categories child ON child.parent_id = parent.id
+         WHERE parent.section = 'reading'
+           AND parent.part = 5
+           AND parent.status = 'active'
+           AND parent.parent_id IS NULL
+           AND child.name = '未细分'
+           AND child.is_default = true
+           AND child.status = 'active'
+         ORDER BY parent.sort_order, parent.id`,
+      );
+
+      expect(rows.map((row) => row.name)).toEqual([
+        '词性判断',
+        '固定搭配',
+        '连接词',
+        '介词搭配',
+        '语法（时态、语态、从句）',
+        '词汇辨析',
+      ]);
+      expect(rows.every((row) => typeof row.default_child_id === 'number')).toBe(true);
+    });
+  });
+
+  it('accepts a valid Part 5 question and rejects invalid options', async () => {
+    await withTestClient(async (client) => {
+      const { rows: [category] } = await client.query(
+        `SELECT id FROM question_categories
+         WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
+         ORDER BY id LIMIT 1`,
+      );
+      const { rows: [question] } = await client.query(
+        `INSERT INTO review_questions
+         (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+          correct_option, analysis, category_id)
+         VALUES ('reading', 5, 'single_choice', 'The report is ___ complete.',
+          'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', $1)
+         RETURNING id`,
+        [category.id],
+      );
+      expect(question.id).toBeTypeOf('number');
+
+      await expect(client.query(
+        `INSERT INTO review_questions
+         (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+          correct_option, analysis, category_id)
+         VALUES ('reading', 5, 'multiple_choice', 'Invalid format.',
+          'A', 'B', 'C', 'D', 'A', 'Invalid.', $1)`,
+        [category.id],
+      )).rejects.toThrow();
+      await expect(client.query(
+        `INSERT INTO review_questions
+         (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+          correct_option, analysis, category_id)
+         VALUES ('reading', 5, 'single_choice', 'Invalid answer.',
+          'A', 'B', 'C', 'D', 'E', 'Invalid.', $1)`,
+        [category.id],
+      )).rejects.toThrow();
+    });
+  });
+
+  it('rejects duplicate session questions and attempt request ids', async () => {
+    await withTestClient(async (client) => {
+      const { rows: [category] } = await client.query(
+        `SELECT id FROM question_categories
+         WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
+         ORDER BY id LIMIT 1`,
+      );
+      const { rows: [question] } = await client.query(
+        `INSERT INTO review_questions
+         (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+          correct_option, analysis, category_id)
+         VALUES ('reading', 5, 'single_choice', 'The report is ___ complete.',
+          'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', $1)
+         RETURNING id`,
+        [category.id],
+      );
+      const { rows: [session] } = await client.query(
+        `INSERT INTO question_review_sessions
+         (section, part, mode, planned_count)
+         VALUES ('reading', 5, 'weak_first', 1)
+         RETURNING id`,
+      );
+      const insertSessionItem = `INSERT INTO question_review_session_items
+        (session_id, question_id, position)
+        VALUES ($1, $2, 1)`;
+      await expect(client.query(insertSessionItem, [session.id, question.id])).resolves.toBeDefined();
+      await expect(client.query(insertSessionItem, [session.id, question.id])).rejects.toThrow();
+
+      const requestId = '85ed0afc-2f4a-4405-8818-91418e2e15c';
+      const insertAttempt = `INSERT INTO question_attempts
+        (request_id, session_id, question_id, selected_option, is_correct)
+        VALUES ($1, $2, $3, 'B', true)`;
+      await expect(client.query(insertAttempt, [requestId, session.id, question.id])).resolves.toBeDefined();
+      await expect(client.query(insertAttempt, [requestId, session.id, question.id])).rejects.toThrow();
+    });
+  });
+
   it('stores reading practice sessions and Part 5-7 scores', async () => {
     await withTestClient(async (client) => {
       const { rows } = await client.query(
