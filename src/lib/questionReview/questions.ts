@@ -411,7 +411,7 @@ export async function listQuestions(
      WHERE ${whereSql}
      ORDER BY ${normalized.sortSql}
      LIMIT $${pageSizeParam} OFFSET $${pageParam}`,
-    [...params, normalized.pageSize, (normalized.page - 1) * normalized.pageSize],
+    [...params, (normalized.page - 1) * normalized.pageSize, normalized.pageSize],
   );
 
   const items = rows.map((row) => ({

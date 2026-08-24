@@ -217,7 +217,8 @@ describe('question repository', () => {
     );
 
     await expect(listQuestions(client, {
-      page: 2,
+      search: 'aggregation',
+      page: 1,
       pageSize: 1,
       sort: 'unattempted_first',
     })).resolves.toEqual({
@@ -227,9 +228,10 @@ describe('question repository', () => {
         stats: { correctCount: 2, wrongCount: 1, latestCorrect: false, latestDurationMs: 1200 },
       })],
       total: 3,
-      page: 2,
+      page: 1,
       pageSize: 1,
     });
     expect(vi.mocked(client.query).mock.calls[1][0]).toContain('CASE WHEN latest_attempt.is_correct IS NULL THEN 0 ELSE 1 END');
+    expect(vi.mocked(client.query).mock.calls[1][1]).toEqual(['aggregation', 0, 1]);
   });
 });
