@@ -85,13 +85,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const client = createClient();
   await client.connect();
+  const needsTransaction = fields.stem !== undefined;
+  let transactionOpen = false;
   try {
+    if (needsTransaction) {
+      await client.query('BEGIN');
+      transactionOpen = true;
+    }
     const result = await updateQuestion(client, id, fields);
     if (result.duplicate) {
+      if (transactionOpen) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+      }
       return NextResponse.json({ error: '检测到相同题干', duplicateId: result.duplicateId }, { status: 409 });
+    }
+    if (transactionOpen) {
+      await client.query('COMMIT');
+      transactionOpen = false;
     }
     return NextResponse.json(result.question);
   } catch (error) {
+    if (transactionOpen) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve the original mutation error if rollback also fails.
+      }
+    }
     return questionErrorResponse(error);
   } finally {
     await client.end();

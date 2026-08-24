@@ -134,6 +134,20 @@ describe('question repository', () => {
     expect(confirmed).toMatchObject({ duplicate: false, question: { id: 34, status: 'learning' } });
   });
 
+  it('locks a changed stem before duplicate lookup during an update', async () => {
+    const client = clientWith(
+      [currentQuestion],
+      [activeChild],
+      [],
+      [{ id: 35 }],
+    );
+    await expect(updateQuestion(client, currentQuestion.id, {
+      stem: 'A newly shared stem',
+    })).resolves.toEqual({ duplicate: true, duplicateId: 35 });
+    expect(vi.mocked(client.query).mock.calls[2][0]).toContain('pg_advisory_xact_lock');
+    expect(vi.mocked(client.query).mock.calls[3][0]).toContain('SELECT id FROM review_questions');
+  });
+
   it('commits a saved POST and rolls back duplicate, conflict, and unexpected POST failures', async () => {
     const client = { connect: vi.fn(), end: vi.fn(), query: vi.fn() };
     vi.resetModules();
@@ -184,6 +198,55 @@ describe('question repository', () => {
     await expect(POST(new NextRequest('http://localhost/api/review-questions', {
       method: 'POST', body: JSON.stringify(input),
     }))).rejects.toThrow('database unavailable');
+    expect(vi.mocked(client.query).mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    vi.doUnmock('@/lib/db');
+  });
+
+  it('commits a stem-changing PATCH and rolls back duplicate and unexpected failures', async () => {
+    const client = { connect: vi.fn(), end: vi.fn(), query: vi.fn() };
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ createClient: () => client }));
+    const { PATCH } = await import('@/app/api/review-questions/[id]/route');
+    const context = { params: Promise.resolve({ id: String(currentQuestion.id) }) };
+
+    client.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [currentQuestion] })
+      .mockResolvedValueOnce({ rows: [activeChild] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 35 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const duplicate = await PATCH(new NextRequest('http://localhost/api/review-questions/34', {
+      method: 'PATCH', body: JSON.stringify({ stem: 'A newly shared stem' }),
+    }), context);
+    expect(duplicate.status).toBe(409);
+    expect(vi.mocked(client.query).mock.calls.map(([sql]) => sql)).toEqual(expect.arrayContaining([
+      'BEGIN', 'ROLLBACK',
+    ]));
+
+    client.query.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [currentQuestion] })
+      .mockResolvedValueOnce({ rows: [activeChild] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...currentQuestion, stem: 'A newly shared stem' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const updated = await PATCH(new NextRequest('http://localhost/api/review-questions/34', {
+      method: 'PATCH', body: JSON.stringify({ stem: 'A newly shared stem' }),
+    }), context);
+    expect(updated.status).toBe(200);
+    expect(vi.mocked(client.query).mock.calls.map(([sql]) => sql)).toEqual(expect.arrayContaining([
+      'BEGIN', 'COMMIT',
+    ]));
+
+    client.query.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(PATCH(new NextRequest('http://localhost/api/review-questions/34', {
+      method: 'PATCH', body: JSON.stringify({ stem: 'A newly shared stem' }),
+    }), context)).rejects.toThrow('database unavailable');
     expect(vi.mocked(client.query).mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
     vi.doUnmock('@/lib/db');
   });

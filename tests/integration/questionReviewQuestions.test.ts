@@ -224,6 +224,103 @@ describe('question review questions', () => {
     });
   }, 60_000);
 
+  it('allows one concurrent stem-changing PATCH and permits a confirmed duplicate retry', async () => {
+    const suffix = `${Date.now()}_${Math.round(Math.random() * 1_000_000)}`;
+    const setup = createClient();
+    let setupOpen = false;
+    let parentId: number | null = null;
+    let childId: number | null = null;
+    let firstQuestionId: number | null = null;
+    let secondQuestionId: number | null = null;
+    try {
+      await setup.connect();
+      setupOpen = true;
+      const { rows: [ids] } = await setup.query(
+        `WITH parent AS (
+           INSERT INTO question_categories (section, part, name, sort_order)
+           VALUES ('reading', 5, $1, 904)
+           RETURNING id
+         ), child AS (
+           INSERT INTO question_categories (section, part, parent_id, name)
+           SELECT 'reading', 5, id, $2 FROM parent
+           RETURNING id
+         ), first_question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 5, 'single_choice', $3, 'A', 'B', 'C', 'D', 'A', 'test', id
+           FROM child
+           RETURNING id
+         ), second_question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 5, 'single_choice', $4, 'A', 'B', 'C', 'D', 'A', 'test', id
+           FROM child
+           RETURNING id
+         )
+         SELECT
+           (SELECT id FROM parent) AS parent_id,
+           (SELECT id FROM child) AS child_id,
+           (SELECT id FROM first_question) AS first_question_id,
+           (SELECT id FROM second_question) AS second_question_id`,
+        [
+          `PATCH 并发父分类_${suffix}`,
+          `PATCH 并发子分类_${suffix}`,
+          `PATCH original one ${suffix}`,
+          `PATCH original two ${suffix}`,
+        ],
+      );
+      parentId = ids.parent_id;
+      childId = ids.child_id;
+      firstQuestionId = ids.first_question_id;
+      secondQuestionId = ids.second_question_id;
+      await setup.end();
+      setupOpen = false;
+
+      const { PATCH } = await import('@/app/api/review-questions/[id]/route');
+      const sharedStem = `PATCH shared normalized stem ${suffix}`;
+      const responses = await Promise.all([
+        PATCH(new NextRequest(`http://localhost/api/review-questions/${firstQuestionId}`, {
+          method: 'PATCH', body: JSON.stringify({ stem: sharedStem }),
+        }), { params: Promise.resolve({ id: String(firstQuestionId) }) }),
+        PATCH(new NextRequest(`http://localhost/api/review-questions/${secondQuestionId}`, {
+          method: 'PATCH', body: JSON.stringify({ stem: `  ${sharedStem}  ` }),
+        }), { params: Promise.resolve({ id: String(secondQuestionId) }) }),
+      ]);
+      expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+      const success = responses.find((response) => response.status === 200)!;
+      const duplicate = responses.find((response) => response.status === 409)!;
+      const saved = await success.json() as { id: number };
+      await expect(duplicate.json()).resolves.toEqual({
+        error: '检测到相同题干',
+        duplicateId: saved.id,
+      });
+
+      const rejectedId = saved.id === firstQuestionId ? secondQuestionId : firstQuestionId;
+      const confirmed = await PATCH(new NextRequest(`http://localhost/api/review-questions/${rejectedId}`, {
+        method: 'PATCH', body: JSON.stringify({ stem: sharedStem, confirmDuplicate: true }),
+      }), { params: Promise.resolve({ id: String(rejectedId) }) });
+      expect(confirmed.status).toBe(200);
+    } finally {
+      if (setupOpen) await setup.end();
+      if (firstQuestionId !== null && secondQuestionId !== null) {
+        const cleanup = createClient();
+        await cleanup.connect();
+        try {
+          await cleanup.query('DELETE FROM review_questions WHERE id = ANY($1::int[])', [[
+            firstQuestionId,
+            secondQuestionId,
+          ]]);
+          if (childId !== null) await cleanup.query('DELETE FROM question_categories WHERE id = $1', [childId]);
+          if (parentId !== null) await cleanup.query('DELETE FROM question_categories WHERE id = $1', [parentId]);
+        } finally {
+          await cleanup.end();
+        }
+      }
+    }
+  }, 60_000);
+
   it('returns duplicate conflicts and soft-delete responses from question routes', async () => {
     const client = { connect: vi.fn(), end: vi.fn(), query: vi.fn() };
     vi.resetModules();
