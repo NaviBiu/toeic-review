@@ -67,40 +67,81 @@ describe('schema constraints', () => {
     });
   });
 
-  it('rejects duplicate session questions and attempt request ids', async () => {
+  it('rejects duplicate questions in a review session', async () => {
     await withTestClient(async (client) => {
-      const { rows: [category] } = await client.query(
-        `SELECT id FROM question_categories
-         WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
-         ORDER BY id LIMIT 1`,
+      const { rows: [sessionItem] } = await client.query(
+        `WITH category AS (
+           SELECT id FROM question_categories
+           WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
+           ORDER BY id LIMIT 1
+         ), question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 5, 'single_choice', 'The report is ___ complete.',
+             'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', id
+           FROM category
+           RETURNING id
+         ), review_session AS (
+           INSERT INTO question_review_sessions (section, part, mode, planned_count)
+           VALUES ('reading', 5, 'weak_first', 1)
+           RETURNING id
+         ), session_item AS (
+           INSERT INTO question_review_session_items (session_id, question_id, position)
+           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           RETURNING session_id, question_id
+         )
+         SELECT session_id, question_id FROM session_item`,
       );
-      const { rows: [question] } = await client.query(
-        `INSERT INTO review_questions
-         (section, part, question_format, stem, option_a, option_b, option_c, option_d,
-          correct_option, analysis, category_id)
-         VALUES ('reading', 5, 'single_choice', 'The report is ___ complete.',
-          'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', $1)
-         RETURNING id`,
-        [category.id],
-      );
-      const { rows: [session] } = await client.query(
-        `INSERT INTO question_review_sessions
-         (section, part, mode, planned_count)
-         VALUES ('reading', 5, 'weak_first', 1)
-         RETURNING id`,
-      );
-      const insertSessionItem = `INSERT INTO question_review_session_items
-        (session_id, question_id, position)
-        VALUES ($1, $2, 1)`;
-      await expect(client.query(insertSessionItem, [session.id, question.id])).resolves.toBeDefined();
-      await expect(client.query(insertSessionItem, [session.id, question.id])).rejects.toThrow();
 
+      await expect(client.query(
+        `INSERT INTO question_review_session_items (session_id, question_id, position)
+         VALUES ($1, $2, 2)`,
+        [sessionItem.session_id, sessionItem.question_id],
+      )).rejects.toThrow();
+    });
+  });
+
+  it('rejects duplicate question attempt request ids', async () => {
+    await withTestClient(async (client) => {
       const requestId = '85ed0afc-2f4a-4405-8818-91418e2e15c';
-      const insertAttempt = `INSERT INTO question_attempts
-        (request_id, session_id, question_id, selected_option, is_correct)
-        VALUES ($1, $2, $3, 'B', true)`;
-      await expect(client.query(insertAttempt, [requestId, session.id, question.id])).resolves.toBeDefined();
-      await expect(client.query(insertAttempt, [requestId, session.id, question.id])).rejects.toThrow();
+      const { rows: [attempt] } = await client.query(
+        `WITH category AS (
+           SELECT id FROM question_categories
+           WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
+           ORDER BY id LIMIT 1
+         ), question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 5, 'single_choice', 'The report is ___ complete.',
+             'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', id
+           FROM category
+           RETURNING id
+         ), review_session AS (
+           INSERT INTO question_review_sessions (section, part, mode, planned_count)
+           VALUES ('reading', 5, 'weak_first', 1)
+           RETURNING id
+         ), session_item AS (
+           INSERT INTO question_review_session_items (session_id, question_id, position)
+           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           RETURNING session_id, question_id
+         ), first_attempt AS (
+           INSERT INTO question_attempts
+             (request_id, session_id, question_id, selected_option, is_correct)
+           SELECT $1, session_id, question_id, 'B', true FROM session_item
+           RETURNING session_id, question_id
+         )
+         SELECT session_id, question_id FROM first_attempt`,
+        [requestId],
+      );
+
+      await expect(client.query(
+        `INSERT INTO question_attempts
+         (request_id, session_id, question_id, selected_option, is_correct)
+         VALUES ($1, $2, $3, 'B', true)`,
+        [requestId, attempt.session_id, attempt.question_id],
+      )).rejects.toThrow();
     });
   });
 
