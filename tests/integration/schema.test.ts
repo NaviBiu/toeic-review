@@ -145,6 +145,48 @@ describe('schema constraints', () => {
     });
   });
 
+  it('stores submitted duration separately from editable timing and rejects negatives', async () => {
+    await withTestClient(async (client) => {
+      const { rows: [attempt] } = await client.query(
+        `WITH category AS (
+           SELECT id FROM question_categories
+           WHERE section = 'reading' AND part = 5 AND name = '未细分' AND is_default = true
+           ORDER BY id LIMIT 1
+         ), question AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           SELECT 'reading', 5, 'single_choice', 'Submitted duration question',
+             'A', 'B', 'C', 'D', 'B', 'test', id FROM category RETURNING id
+         ), review_session AS (
+           INSERT INTO question_review_sessions (section, part, mode, planned_count)
+           VALUES ('reading', 5, 'weak_first', 1) RETURNING id
+         ), item AS (
+           INSERT INTO question_review_session_items (session_id, question_id, position)
+           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           RETURNING session_id, question_id
+         )
+         INSERT INTO question_attempts
+           (request_id, session_id, question_id, selected_option, is_correct, duration_ms,
+            submitted_duration_ms)
+         SELECT '85ed0afc-2f4a-4405-8818-91418e2e15ce', session_id, question_id,
+           'B', true, 9000, 9000 FROM item
+         RETURNING id`,
+      );
+
+      await client.query('UPDATE question_attempts SET duration_ms = 12500 WHERE id = $1', [attempt.id]);
+      const { rows: [timing] } = await client.query(
+        'SELECT duration_ms, submitted_duration_ms FROM question_attempts WHERE id = $1',
+        [attempt.id],
+      );
+      expect(timing).toEqual({ duration_ms: 12500, submitted_duration_ms: 9000 });
+      await expect(client.query(
+        'UPDATE question_attempts SET submitted_duration_ms = -1 WHERE id = $1',
+        [attempt.id],
+      )).rejects.toThrow();
+    });
+  });
+
   it('stores reading practice sessions and Part 5-7 scores', async () => {
     await withTestClient(async (client) => {
       const { rows } = await client.query(

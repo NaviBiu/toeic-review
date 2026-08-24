@@ -48,6 +48,7 @@ type AttemptRow = {
   analysis: string;
   notes: string | null;
   duration_ms: number | string | null;
+  submitted_duration_ms: number | string | null;
   duration_excluded: boolean;
 };
 
@@ -263,7 +264,8 @@ async function findSessionQuestion(
 
 async function findAttempt(client: VercelClient, attemptId: number): Promise<AttemptRow> {
   const { rows } = await client.query(
-    `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.duration_excluded,
+    `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
+       attempt.duration_excluded,
        attempt.session_id, attempt.question_id, attempt.selected_option,
        question.correct_option, question.analysis, question.notes
      FROM question_attempts attempt
@@ -278,7 +280,8 @@ async function findAttempt(client: VercelClient, attemptId: number): Promise<Att
 
 async function findAttemptByRequestId(client: VercelClient, requestId: string): Promise<AttemptRow> {
   const { rows } = await client.query(
-    `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.duration_excluded,
+    `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
+       attempt.duration_excluded,
        attempt.session_id, attempt.question_id, attempt.selected_option,
        question.correct_option, question.analysis, question.notes
      FROM question_attempts attempt
@@ -292,11 +295,13 @@ async function findAttemptByRequestId(client: VercelClient, requestId: string): 
 }
 
 function matchesAttemptPayload(attempt: AttemptRow, input: SubmitAttemptInput): boolean {
-  const storedDuration = attempt.duration_ms === null ? null : Number(attempt.duration_ms);
+  const submittedDuration = attempt.submitted_duration_ms === null
+    ? null
+    : Number(attempt.submitted_duration_ms);
   return Number(attempt.session_id) === input.sessionId
     && Number(attempt.question_id) === input.questionId
     && attempt.selected_option === input.selectedOption
-    && storedDuration === input.durationMs;
+    && submittedDuration === input.durationMs;
 }
 
 async function findStats(client: VercelClient, questionId: number): Promise<QuestionStats> {
@@ -352,8 +357,9 @@ export async function submitAttempt(client: VercelClient, input: SubmitAttemptIn
   const question = await findSessionQuestion(client, input.sessionId, input.questionId);
   await client.query(
     `INSERT INTO question_attempts
-       (request_id, session_id, question_id, selected_option, is_correct, duration_ms)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (request_id, session_id, question_id, selected_option, is_correct, duration_ms,
+        submitted_duration_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $6)
      ON CONFLICT (request_id) DO NOTHING`,
     [input.requestId, input.sessionId, input.questionId, input.selectedOption,
       input.selectedOption === question.correctOption, input.durationMs],

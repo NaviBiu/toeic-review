@@ -23,6 +23,7 @@ const storedAttempt = {
   analysis: 'test',
   notes: null,
   duration_ms: input.durationMs,
+  submitted_duration_ms: input.durationMs,
   duration_excluded: false,
 };
 
@@ -73,19 +74,50 @@ describe('session route input', () => {
 
 describe('attempt idempotency', () => {
   it('returns the existing attempt for the identical payload', async () => {
-    await expect(submitAttempt(clientWith(
+    const client = clientWith(
       [question],
       [],
       [storedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
-    ), input)).resolves.toMatchObject({ attemptId: 40, durationMs: 9000, isCorrect: false });
+    );
+
+    await expect(submitAttempt(client, input)).resolves.toMatchObject({
+      attemptId: 40, durationMs: 9000, isCorrect: false,
+    });
+    expect(vi.mocked(client.query).mock.calls[1][0]).toContain('submitted_duration_ms');
+    expect(vi.mocked(client.query).mock.calls[1][1]).toEqual([
+      input.requestId, input.sessionId, input.questionId, input.selectedOption, false, input.durationMs,
+    ]);
+  });
+
+  it('uses the original submitted duration after a timing edit', async () => {
+    const editedAttempt = { ...storedAttempt, duration_ms: 12500 };
+    const client = clientWith(
+      [question],
+      [],
+      [storedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
+      [{ id: storedAttempt.id }],
+      [editedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 12500 }],
+      [question],
+      [],
+      [editedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 12500 }],
+    );
+
+    const created = await submitAttempt(client, input);
+    const { updateAttemptTiming } = await import('@/lib/questionReview/sessions');
+    await updateAttemptTiming(client, created.attemptId, { durationMs: 12500, durationExcluded: false });
+
+    await expect(submitAttempt(client, input)).resolves.toMatchObject({ attemptId: created.attemptId });
   });
 
   it.each([
     ['a different session', { ...storedAttempt, session_id: 21 }],
     ['a different question', { ...storedAttempt, question_id: 31 }],
     ['a different selected option', { ...storedAttempt, selected_option: 'B' }],
-    ['a different duration', { ...storedAttempt, duration_ms: 9001 }],
+    ['a different duration', { ...storedAttempt, submitted_duration_ms: 9001 }],
   ])('rejects an idempotency key reused with %s', async (_label, conflictingAttempt) => {
     await expect(submitAttempt(clientWith([question], [], [conflictingAttempt]), input))
       .rejects.toThrow('请求标识已用于其他作答');
