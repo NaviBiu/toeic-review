@@ -14,6 +14,9 @@ type SessionCandidateRow = SelectionCandidate & {
   option_b: string;
   option_c: string;
   option_d: string;
+  correct_option: QuestionOption;
+  analysis: string;
+  notes: string | null;
   source: string | null;
   parent_name: string;
   category_name: string;
@@ -172,7 +175,8 @@ async function loadCandidates(
        ORDER BY question_id, attempted_at DESC, id DESC
      )
      SELECT question.id, question.stem, question.option_a, question.option_b,
-       question.option_c, question.option_d, question.source,
+       question.option_c, question.option_d, question.correct_option,
+       question.analysis, question.notes, question.source,
        parent.name AS parent_name, category.name AS category_name,
        COALESCE(attempt_stats.correct_count, 0)::int AS correct_count,
        COALESCE(attempt_stats.wrong_count, 0)::int AS wrong_count,
@@ -230,9 +234,12 @@ export async function createReviewSession(
   const sessionId = Number(rows[0].id);
   for (const [index, questionId] of selectedIds.entries()) {
     await client.query(
-      `INSERT INTO question_review_session_items (session_id, question_id, position)
-       VALUES ($1, $2, $3)`,
-      [sessionId, questionId, index + 1],
+      `INSERT INTO question_review_session_items
+         (session_id, question_id, position, correct_option_snapshot, analysis_snapshot,
+          notes_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [sessionId, questionId, index + 1, byId.get(questionId)!.correct_option,
+        byId.get(questionId)!.analysis, byId.get(questionId)!.notes],
     );
   }
 
@@ -250,9 +257,9 @@ async function findSessionQuestion(
   questionId: number,
 ): Promise<{ correctOption: QuestionOption; analysis: string; notes: string | null }> {
   const { rows } = await client.query(
-    `SELECT question.correct_option, question.analysis, question.notes
+    `SELECT item.correct_option_snapshot AS correct_option,
+       item.analysis_snapshot AS analysis, item.notes_snapshot AS notes
      FROM question_review_session_items item
-     JOIN review_questions question ON question.id = item.question_id
      WHERE item.session_id = $1 AND item.question_id = $2`,
     [sessionId, questionId],
   );
@@ -270,9 +277,11 @@ async function findAttempt(client: VercelClient, attemptId: number): Promise<Att
     `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
        attempt.duration_excluded,
        attempt.session_id, attempt.question_id, attempt.selected_option,
-       question.correct_option, question.analysis, question.notes
+       item.correct_option_snapshot AS correct_option,
+       item.analysis_snapshot AS analysis, item.notes_snapshot AS notes
      FROM question_attempts attempt
-     JOIN review_questions question ON question.id = attempt.question_id
+     JOIN question_review_session_items item
+       ON item.session_id = attempt.session_id AND item.question_id = attempt.question_id
      WHERE attempt.id = $1`,
     [attemptId],
   );
@@ -286,9 +295,11 @@ async function findAttemptByRequestId(client: VercelClient, requestId: string): 
     `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
        attempt.duration_excluded,
        attempt.session_id, attempt.question_id, attempt.selected_option,
-       question.correct_option, question.analysis, question.notes
+       item.correct_option_snapshot AS correct_option,
+       item.analysis_snapshot AS analysis, item.notes_snapshot AS notes
      FROM question_attempts attempt
-     JOIN review_questions question ON question.id = attempt.question_id
+     JOIN question_review_session_items item
+       ON item.session_id = attempt.session_id AND item.question_id = attempt.question_id
      WHERE attempt.request_id = $1`,
     [requestId],
   );

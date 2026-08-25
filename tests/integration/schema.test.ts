@@ -1,7 +1,39 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { withTestClient } from './setup';
 
 describe('schema constraints', () => {
+  it('defines a safely backfilled grading snapshot migration', () => {
+    const migrationPath = resolve(
+      process.cwd(),
+      'migrations/0007_question_review_session_item_snapshots.sql',
+    );
+    const migrationExists = existsSync(migrationPath);
+    expect(migrationExists).toBe(true);
+    if (!migrationExists) return;
+
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toMatch(/ADD COLUMN correct_option_snapshot TEXT/);
+    expect(sql).toMatch(/ADD COLUMN analysis_snapshot TEXT/);
+    expect(sql).toMatch(/ADD COLUMN notes_snapshot TEXT/);
+    expect(sql).toMatch(
+      /UPDATE question_review_session_items AS item[\s\S]*FROM review_questions AS question/,
+    );
+    expect(sql.indexOf('UPDATE question_review_session_items AS item')).toBeLessThan(
+      sql.indexOf('ALTER COLUMN correct_option_snapshot SET NOT NULL'),
+    );
+    expect(sql).toMatch(/CHECK \(correct_option_snapshot IN \('A', 'B', 'C', 'D'\)\) NOT VALID/);
+    expect(sql).toContain('VALIDATE CONSTRAINT question_review_session_items_correct_option_snapshot_check');
+    expect(sql).toContain('ALTER COLUMN correct_option_snapshot SET NOT NULL');
+    expect(sql).toContain('ALTER COLUMN analysis_snapshot SET NOT NULL');
+    expect(sql).toContain('CREATE FUNCTION set_question_review_session_item_snapshots()');
+    expect(sql).toContain('CREATE TRIGGER question_review_session_items_set_snapshots');
+    expect(sql).toMatch(
+      /BEFORE INSERT ON question_review_session_items[\s\S]*set_question_review_session_item_snapshots\(\)/,
+    );
+  });
+
   it('seeds six active Part 5 category trees with default children', async () => {
     await withTestClient(async (client) => {
       const { rows } = await client.query(
@@ -87,16 +119,21 @@ describe('schema constraints', () => {
            VALUES ('reading', 5, 'weak_first', 1)
            RETURNING id
          ), session_item AS (
-           INSERT INTO question_review_session_items (session_id, question_id, position)
-           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           INSERT INTO question_review_session_items
+             (session_id, question_id, position, correct_option_snapshot, analysis_snapshot,
+              notes_snapshot)
+           SELECT review_session.id, question.id, 1, question.correct_option,
+             question.analysis, question.notes
+           FROM review_session CROSS JOIN question
            RETURNING session_id, question_id
          )
          SELECT session_id, question_id FROM session_item`,
       );
 
       await expect(client.query(
-        `INSERT INTO question_review_session_items (session_id, question_id, position)
-         VALUES ($1, $2, 2)`,
+        `INSERT INTO question_review_session_items
+           (session_id, question_id, position, correct_option_snapshot, analysis_snapshot)
+         VALUES ($1, $2, 2, 'B', '副词修饰形容词。')`,
         [sessionItem.session_id, sessionItem.question_id],
       )).rejects.toThrow();
     });
@@ -123,8 +160,12 @@ describe('schema constraints', () => {
            VALUES ('reading', 5, 'weak_first', 1)
            RETURNING id
          ), session_item AS (
-           INSERT INTO question_review_session_items (session_id, question_id, position)
-           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           INSERT INTO question_review_session_items
+             (session_id, question_id, position, correct_option_snapshot, analysis_snapshot,
+              notes_snapshot)
+           SELECT review_session.id, question.id, 1, question.correct_option,
+             question.analysis, question.notes
+           FROM review_session CROSS JOIN question
            RETURNING session_id, question_id
          ), first_attempt AS (
            INSERT INTO question_attempts
@@ -162,8 +203,12 @@ describe('schema constraints', () => {
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1) RETURNING id
          ), item AS (
-           INSERT INTO question_review_session_items (session_id, question_id, position)
-           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           INSERT INTO question_review_session_items
+             (session_id, question_id, position, correct_option_snapshot, analysis_snapshot,
+              notes_snapshot)
+           SELECT review_session.id, question.id, 1, question.correct_option,
+             question.analysis, question.notes
+           FROM review_session CROSS JOIN question
            RETURNING session_id, question_id
          )
          INSERT INTO question_attempts

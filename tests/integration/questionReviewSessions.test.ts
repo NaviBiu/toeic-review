@@ -51,6 +51,13 @@ describe('question review sessions', () => {
       expect(session.questions[0]).not.toHaveProperty('correctOption');
       expect(session.questions[0]).not.toHaveProperty('analysis');
 
+      await client.query(
+        `UPDATE review_questions
+         SET correct_option = 'A', analysis = 'Edited analysis.', notes = 'Edited note.'
+         WHERE id = $1`,
+        [ids.first_question_id],
+      );
+
       const attempt = await submitAttempt(client, {
         requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
         sessionId: session.id,
@@ -60,6 +67,7 @@ describe('question review sessions', () => {
       });
       expect(attempt.correctOption).toBe('B');
       expect(attempt.analysis).toBe('副词修饰形容词。');
+      expect(attempt.notes).toBe('note');
       expect(attempt.isCorrect).toBe(false);
 
       const retry = await submitAttempt(client, {
@@ -70,6 +78,9 @@ describe('question review sessions', () => {
         durationMs: 9000,
       });
       expect(retry.attemptId).toBe(attempt.attemptId);
+      expect(retry).toMatchObject({
+        correctOption: 'B', analysis: '副词修饰形容词。', notes: 'note', isCorrect: false,
+      });
       const { rows: [count] } = await client.query(
         'SELECT COUNT(*)::int AS count FROM question_attempts WHERE request_id = $1',
         ['4f21de2e-e7a5-4b72-9425-c3086fa00101'],
@@ -106,7 +117,10 @@ describe('question review sessions', () => {
         durationMs: 12500,
         durationExcluded: false,
       });
-      expect(changedDuration).toMatchObject({ durationMs: 12500, durationExcluded: false, isCorrect: false });
+      expect(changedDuration).toMatchObject({
+        correctOption: 'B', analysis: '副词修饰形容词。', notes: 'note',
+        durationMs: 12500, durationExcluded: false, isCorrect: false,
+      });
       await expect(submitAttempt(client, {
         requestId: '4f21de2e-e7a5-4b72-9425-c3086fa00101',
         sessionId: session.id,
@@ -161,8 +175,12 @@ describe('question review sessions', () => {
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1) RETURNING id
          ), item AS (
-           INSERT INTO question_review_session_items (session_id, question_id, position)
-           SELECT review_session.id, question.id, 1 FROM review_session CROSS JOIN question
+           INSERT INTO question_review_session_items
+             (session_id, question_id, position, correct_option_snapshot, analysis_snapshot,
+              notes_snapshot)
+           SELECT review_session.id, question.id, 1, question.correct_option,
+             question.analysis, question.notes
+           FROM review_session CROSS JOIN question
          )
          SELECT (SELECT id FROM parent) AS parent_id,
            (SELECT id FROM child) AS child_id,

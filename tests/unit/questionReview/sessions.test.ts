@@ -87,6 +87,105 @@ describe('session creation', () => {
     expect(vi.mocked(client.query).mock.calls[0][0]).toContain('FROM review_questions');
     expect(vi.mocked(client.query).mock.calls.some(([sql]) => String(sql).includes('INSERT INTO question_review_sessions'))).toBe(false);
   });
+
+  it('stores grading fields on each selected session item without revealing them', async () => {
+    const candidate = {
+      id: 30,
+      stem: 'The report is ___ complete.',
+      option_a: 'near',
+      option_b: 'nearly',
+      option_c: 'nearest',
+      option_d: 'nearness',
+      correct_option: 'B',
+      analysis: 'An adverb modifies the adjective.',
+      notes: 'Review adverb forms.',
+      source: null,
+      parent_name: 'Word forms',
+      category_name: 'Adverbs',
+      correct_count: 0,
+      wrong_count: 0,
+      latest_correct: null,
+      latest_duration_ms: null,
+    };
+    const client = clientWith([candidate], [{ id: 20 }], []);
+
+    const session = await createReviewSession(client, {
+      mode: 'weak_first',
+      categoryScopeId: null,
+      includeMastered: false,
+      plannedCount: 1,
+    });
+
+    const [insertSql, insertValues] = vi.mocked(client.query).mock.calls[2];
+    expect(insertSql).toContain('correct_option_snapshot');
+    expect(insertSql).toContain('analysis_snapshot');
+    expect(insertSql).toContain('notes_snapshot');
+    expect(insertValues).toEqual([
+      20, 30, 1, 'B', 'An adverb modifies the adjective.', 'Review adverb forms.',
+    ]);
+    expect(session.questions[0]).not.toHaveProperty('correctOption');
+    expect(session.questions[0]).not.toHaveProperty('analysis');
+    expect(session.questions[0]).not.toHaveProperty('notes');
+  });
+});
+
+describe('session grading snapshots', () => {
+  it('grades submission from the session item snapshot', async () => {
+    const client = clientWith(
+      [question],
+      [],
+      [storedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
+    );
+
+    await submitAttempt(client, input);
+
+    const membershipSql = String(vi.mocked(client.query).mock.calls[0][0]);
+    expect(membershipSql).toContain('item.correct_option_snapshot AS correct_option');
+    expect(membershipSql).toContain('item.analysis_snapshot AS analysis');
+    expect(membershipSql).toContain('item.notes_snapshot AS notes');
+    expect(membershipSql).not.toContain('JOIN review_questions');
+  });
+
+  it('returns the session item snapshot for an idempotent retry', async () => {
+    const client = clientWith(
+      [question],
+      [],
+      [storedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
+    );
+
+    await submitAttempt(client, input);
+
+    const retryLookupSql = String(vi.mocked(client.query).mock.calls[2][0]);
+    expect(retryLookupSql).toContain('item.correct_option_snapshot AS correct_option');
+    expect(retryLookupSql).toContain('item.analysis_snapshot AS analysis');
+    expect(retryLookupSql).toContain('item.notes_snapshot AS notes');
+    expect(retryLookupSql).not.toContain('JOIN review_questions');
+  });
+
+  it('returns the session item snapshot after a timing update', async () => {
+    const client = clientWith(
+      [{ id: storedAttempt.id }],
+      [{ ...storedAttempt, duration_ms: 12500 }],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 12500 }],
+    );
+    const { updateAttemptTiming } = await import('@/lib/questionReview/sessions');
+
+    const result = await updateAttemptTiming(client, storedAttempt.id, {
+      durationMs: 12500,
+      durationExcluded: false,
+    });
+
+    const timingLookupSql = String(vi.mocked(client.query).mock.calls[1][0]);
+    expect(timingLookupSql).toContain('item.correct_option_snapshot AS correct_option');
+    expect(timingLookupSql).toContain('item.analysis_snapshot AS analysis');
+    expect(timingLookupSql).toContain('item.notes_snapshot AS notes');
+    expect(timingLookupSql).not.toContain('JOIN review_questions');
+    expect(result).toMatchObject({
+      correctOption: 'B', analysis: 'test', notes: null, durationMs: 12500,
+    });
+  });
 });
 
 describe('attempt idempotency', () => {
