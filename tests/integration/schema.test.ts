@@ -14,24 +14,40 @@ describe('schema constraints', () => {
     if (!migrationExists) return;
 
     const sql = readFileSync(migrationPath, 'utf8');
-    expect(sql).toMatch(/ADD COLUMN correct_option_snapshot TEXT/);
-    expect(sql).toMatch(/ADD COLUMN analysis_snapshot TEXT/);
-    expect(sql).toMatch(/ADD COLUMN notes_snapshot TEXT/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS correct_option_snapshot TEXT/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS analysis_snapshot TEXT/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS notes_snapshot TEXT/);
     expect(sql).toMatch(
       /UPDATE question_review_session_items AS item[\s\S]*FROM review_questions AS question/,
-    );
-    expect(sql.indexOf('UPDATE question_review_session_items AS item')).toBeLessThan(
-      sql.indexOf('ALTER COLUMN correct_option_snapshot SET NOT NULL'),
     );
     expect(sql).toMatch(/CHECK \(correct_option_snapshot IN \('A', 'B', 'C', 'D'\)\) NOT VALID/);
     expect(sql).toContain('VALIDATE CONSTRAINT question_review_session_items_correct_option_snapshot_check');
     expect(sql).toContain('ALTER COLUMN correct_option_snapshot SET NOT NULL');
     expect(sql).toContain('ALTER COLUMN analysis_snapshot SET NOT NULL');
-    expect(sql).toContain('CREATE FUNCTION set_question_review_session_item_snapshots()');
+    expect(sql).toContain('CREATE OR REPLACE FUNCTION set_question_review_session_item_snapshots()');
     expect(sql).toContain('CREATE TRIGGER question_review_session_items_set_snapshots');
     expect(sql).toMatch(
       /BEFORE INSERT ON question_review_session_items[\s\S]*set_question_review_session_item_snapshots\(\)/,
     );
+
+    const transactions = sql.match(/BEGIN;[\s\S]*?COMMIT;/g) ?? [];
+    expect(transactions).toHaveLength(5);
+    expect(transactions[0]).toContain('ADD COLUMN IF NOT EXISTS correct_option_snapshot');
+    expect(transactions[0]).toContain('CREATE TRIGGER question_review_session_items_set_snapshots');
+    expect(transactions[0]).not.toContain('UPDATE question_review_session_items AS item');
+    expect(transactions[1]).toContain('UPDATE question_review_session_items AS item');
+    expect(transactions[1]).not.toContain('SET NOT NULL');
+    expect(transactions[2]).toContain('ADD CONSTRAINT');
+    expect(transactions[2]).not.toContain('VALIDATE CONSTRAINT');
+    expect(transactions[3]).toContain('VALIDATE CONSTRAINT');
+    expect(transactions[3]).not.toContain('SET NOT NULL');
+    expect(transactions[4]).toContain('ALTER COLUMN correct_option_snapshot SET NOT NULL');
+    expect(sql.indexOf(transactions[0])).toBeLessThan(sql.indexOf(transactions[1]));
+    expect(sql.indexOf(transactions[1])).toBeLessThan(sql.indexOf(transactions[2]));
+    expect(sql.indexOf(transactions[2])).toBeLessThan(sql.indexOf(transactions[3]));
+    expect(sql.indexOf(transactions[3])).toBeLessThan(sql.indexOf(transactions[4]));
+    expect(sql).toContain('DROP TRIGGER IF EXISTS question_review_session_items_set_snapshots');
+    expect(sql).toContain('DROP CONSTRAINT IF EXISTS question_review_session_items_correct_option_snapshot_not_null');
   });
 
   it('seeds six active Part 5 category trees with default children', async () => {

@@ -52,6 +52,32 @@ Green phase:
 - The schema text test verifies additive columns, backfill-before-not-null ordering, validated
   constraints, and the compatibility trigger without applying a migration.
 
+## Migration Lock Follow-Up
+
+- Reproduced the review issue with a text test that expected committed phase boundaries and
+  observed one transaction spanning expansion, backfill, validation, and enforcement.
+- Split migration `0007` into five restart-safe transactions: nullable expansion plus trigger,
+  backfill, `NOT VALID` constraint registration, constraint validation, and final non-null
+  enforcement/helper-constraint cleanup.
+- Committing the trigger in phase one preserves rolling-deploy compatibility before any existing
+  rows are backfilled.
+- Separating constraint registration from validation avoids retaining the stronger DDL lock for
+  the validation scan. Validated not-null checks let the final `SET NOT NULL` phase remain brief.
+- Added `IF NOT EXISTS`, `CREATE OR REPLACE`, trigger recreation, catalog-guarded constraint
+  creation, null-only backfill, and conditional cleanup so a failure after an internal commit can
+  safely rerun before the migration runner records `0007`.
+- A per-batch commit loop was not added because this runner submits each migration file as one SQL
+  query and cannot safely drive bounded top-level batches without a runner change outside scope.
+
+Follow-up verification:
+
+- `npm.cmd test -- tests/integration/schema.test.ts -t "defines a safely backfilled grading snapshot migration"`
+  - Passed: 1 test, 9 skipped.
+- `npm.cmd test -- tests/unit/questionReview/sessions.test.ts`
+  - Passed: 1 file, 13 tests.
+- `npm.cmd run lint -- tests/integration/schema.test.ts tests/unit/questionReview/sessions.test.ts src/lib/questionReview/sessions.ts`
+  - Passed.
+
 ## Verification Limits
 
 - No database/model calls, migration application, or development server were run, as requested.
