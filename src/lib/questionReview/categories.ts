@@ -198,18 +198,45 @@ export async function deleteEmptyCategory(client: VercelClient, id: number): Pro
 
   const { rows: [relations] } = await client.query(
     `SELECT
-       EXISTS(SELECT 1 FROM review_questions WHERE category_id = $1) AS has_questions,
-       EXISTS(SELECT 1 FROM question_categories WHERE parent_id = $1) AS has_children`,
+       EXISTS(
+         SELECT 1
+         FROM review_questions question
+         JOIN question_categories question_category ON question_category.id = question.category_id
+         WHERE question_category.id = $1 OR question_category.parent_id = $1
+       ) AS has_questions,
+       EXISTS(SELECT 1 FROM question_categories WHERE parent_id = $1) AS has_children,
+       EXISTS(
+         SELECT 1 FROM question_categories
+         WHERE parent_id = $1 AND is_default = false
+       ) AS has_non_default_children`,
     [id],
   );
   if (relations.has_questions) {
     throw new CategoryError('该分类仍有关联题目，请先移动或合并', 'conflict');
   }
-  if (relations.has_children) {
+  if (relations.has_non_default_children) {
     throw new CategoryError('该分类仍有子分类，请先移动或合并', 'conflict');
   }
 
-  await client.query('DELETE FROM question_categories WHERE id = $1', [id]);
+  const { rows: deleted } = await client.query(
+    `DELETE FROM question_categories
+     WHERE (id = $1 OR (parent_id = $1 AND is_default = true))
+       AND NOT EXISTS (
+         SELECT 1
+         FROM review_questions question
+         JOIN question_categories question_category ON question_category.id = question.category_id
+         WHERE question_category.id = $1 OR question_category.parent_id = $1
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM question_categories child
+         WHERE child.parent_id = $1 AND child.is_default = false
+       )
+     RETURNING id`,
+    [id],
+  );
+  if (deleted.length === 0) {
+    throw new CategoryError('分类状态已变化，请刷新后重试', 'conflict');
+  }
 }
 
 export async function mergeCategory(
