@@ -159,7 +159,7 @@ describe('schema constraints', () => {
            SELECT 'reading', 5, 'single_choice', 'The report is ___ complete.',
              'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', id
            FROM category
-           RETURNING id
+           RETURNING id, correct_option, analysis, notes
          ), review_session AS (
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1)
@@ -200,7 +200,7 @@ describe('schema constraints', () => {
            SELECT 'reading', 5, 'single_choice', 'The report is ___ complete.',
              'near', 'nearly', 'nearest', 'nearness', 'B', '副词修饰形容词。', id
            FROM category
-           RETURNING id
+           RETURNING id, correct_option, analysis, notes
          ), review_session AS (
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1)
@@ -244,7 +244,8 @@ describe('schema constraints', () => {
              (section, part, question_format, stem, option_a, option_b, option_c, option_d,
               correct_option, analysis, category_id)
            SELECT 'reading', 5, 'single_choice', 'Submitted duration question',
-             'A', 'B', 'C', 'D', 'B', 'test', id FROM category RETURNING id
+             'A', 'B', 'C', 'D', 'B', 'test', id FROM category
+           RETURNING id, correct_option, analysis, notes
          ), review_session AS (
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1) RETURNING id

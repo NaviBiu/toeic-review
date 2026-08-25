@@ -26,7 +26,7 @@ import {
 type PracticeType = 'full_mock' | 'part_drill';
 type PartScore = PracticePartScore;
 type ScenarioRow = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
-type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
+type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl?: string };
 type PracticeRecord = {
   id: number;
   practiceDate: string;
@@ -41,6 +41,11 @@ type Tab = 'analysis' | 'records';
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function attachmentSrc(recordId: number, attachment: PracticeAttachment) {
+  return attachment.dataUrl
+    ?? `/api/mock-exams/${recordId}/attachments/${attachment.id}`;
 }
 
 const PART_OPTIONS: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
@@ -196,8 +201,8 @@ function PracticeRecordListItem({
 
       <div className="flex items-center gap-3 md:justify-end">
         {firstAttachment ? (
-          <button type="button" onClick={() => onPreview(firstAttachment)} title="查看错题图片" className="relative h-16 w-20 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-stone-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-            <img src={firstAttachment.dataUrl} alt={firstAttachment.name} className="h-full w-full object-cover" />
+          <button type="button" onClick={() => onPreview({ ...firstAttachment, dataUrl: attachmentSrc(record.id, firstAttachment) })} title="查看错题图片" className="relative h-16 w-20 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-stone-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+            <img src={attachmentSrc(record.id, firstAttachment)} alt={firstAttachment.name} loading="lazy" className="h-full w-full object-cover" />
             {record.attachments.length > 1 ? <span className="absolute bottom-1 right-1 rounded bg-stone-950/75 px-1.5 py-0.5 text-[10px] font-medium text-white">+{record.attachments.length - 1}</span> : null}
           </button>
         ) : null}
@@ -222,6 +227,8 @@ export default function MockExamsPage() {
   const [editingAttachments, setEditingAttachments] = useState<PracticeAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<PracticeAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
+  const [loadingEditingAttachments, setLoadingEditingAttachments] = useState(false);
+  const [editingAttachmentsReady, setEditingAttachmentsReady] = useState(false);
   const [savingAttachments, setSavingAttachments] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -303,17 +310,33 @@ export default function MockExamsPage() {
     setAttachments((current) => current.filter((_, i) => i !== index));
   }
 
-  function openAttachmentEditor(record: PracticeRecord) {
+  async function openAttachmentEditor(record: PracticeRecord) {
     setEditingRecord(record);
-    setEditingAttachments(record.attachments ?? []);
+    setEditingAttachments([]);
     setAttachmentError('');
+    setLoadingEditingAttachments(true);
+    setEditingAttachmentsReady(false);
+    try {
+      const res = await fetch(`/api/mock-exams/${record.id}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? '图片加载失败');
+      setEditingAttachments(body.attachments ?? []);
+      setEditingAttachmentsReady(true);
+    } catch (err: unknown) {
+      setAttachmentError(errorMessage(err, '图片加载失败，请关闭后重试'));
+    } finally {
+      setLoadingEditingAttachments(false);
+    }
   }
 
   async function handleEditAttachmentChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (editingAttachments.length + files.length > 5) { setAttachmentError('每条成绩最多保存 5 张错题图片'); return; }
     if (files.some((file) => !file.type.startsWith('image/'))) { setAttachmentError('错题附件只能是图片'); return; }
-    const existingBytes = editingAttachments.reduce((sum, item) => sum + Math.ceil(item.dataUrl.length * 0.75), 0);
+    const existingBytes = editingAttachments.reduce(
+      (sum, item) => sum + Math.ceil((item.dataUrl?.length ?? 0) * 0.75),
+      0,
+    );
     if (existingBytes + files.reduce((sum, file) => sum + file.size, 0) > 3_000_000) { setAttachmentError('错题图片合计不能超过约 3 MB'); return; }
     try {
       const next = await Promise.all(files.map((file) => new Promise<PracticeAttachment>((resolve, reject) => {
@@ -636,7 +659,9 @@ export default function MockExamsPage() {
               {editingRecord?.title ? <span className="ml-2">{editingRecord.title}</span> : null}
             </div>
 
-            {editingAttachments.length > 0 ? (
+            {loadingEditingAttachments ? (
+              <div className="rounded-lg border border-stone-200 px-4 py-8 text-center text-sm text-stone-400">图片加载中…</div>
+            ) : editingAttachmentsReady && editingAttachments.length > 0 ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {editingAttachments.map((attachment, index) => (
                   <div key={`${attachment.id}-${attachment.name}-${index}`} className="relative overflow-hidden rounded-lg border border-stone-200 bg-white">
@@ -646,19 +671,19 @@ export default function MockExamsPage() {
                   </div>
                 ))}
               </div>
-            ) : (
+            ) : editingAttachmentsReady ? (
               <div className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-sm text-stone-400">这条成绩还没有错题图片</div>
-            )}
+            ) : null}
 
             <label className="block">
               <span className="mb-2 block text-xs font-medium text-stone-500">追加图片</span>
-              <input type="file" accept="image/*" multiple onChange={handleEditAttachmentChange} className="block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600" />
+              <input type="file" accept="image/*" multiple disabled={!editingAttachmentsReady} onChange={handleEditAttachmentChange} className="block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600 disabled:cursor-not-allowed disabled:opacity-50" />
             </label>
             <p className="text-xs text-stone-400">每条成绩最多 5 张，合计不超过约 3 MB。</p>
             {attachmentError ? <p className="text-sm text-red-600">{attachmentError}</p> : null}
             <div className="flex justify-end gap-2 border-t border-stone-200 pt-4">
               <button type="button" onClick={() => setEditingRecord(null)} className="rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 hover:bg-stone-50">取消</button>
-              <button type="button" onClick={saveEditedAttachments} disabled={savingAttachments} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">{savingAttachments ? '保存中…' : '保存图片'}</button>
+              <button type="button" onClick={saveEditedAttachments} disabled={savingAttachments || !editingAttachmentsReady} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">{savingAttachments ? '保存中…' : '保存图片'}</button>
             </div>
           </div>
         </Modal>
@@ -667,7 +692,7 @@ export default function MockExamsPage() {
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-950/80 p-4" onClick={() => setPreviewAttachment(null)}>
             <div className="relative flex max-h-[94vh] max-w-[94vw] flex-col" onClick={(e) => e.stopPropagation()}>
               <button type="button" onClick={() => setPreviewAttachment(null)} title="关闭图片" aria-label="关闭图片" className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-xl text-stone-700 shadow-md hover:bg-white">×</button>
-              <img src={previewAttachment.dataUrl} alt={previewAttachment.name} className="max-h-[88vh] max-w-[92vw] rounded-md bg-white object-contain shadow-2xl" />
+              <img src={previewAttachment.dataUrl ?? ''} alt={previewAttachment.name} className="max-h-[88vh] max-w-[92vw] rounded-md bg-white object-contain shadow-2xl" />
               <p className="mt-2 truncate text-center text-sm text-white/80">{previewAttachment.name}</p>
             </div>
           </div>

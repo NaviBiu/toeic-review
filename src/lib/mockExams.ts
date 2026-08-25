@@ -6,7 +6,8 @@ export type PartNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type PartScore = { part: PartNumber; correct: number; total: number };
 export type LegacyPartScore = { correct: number; total: number };
 export type ScenarioScore = { scenarioMajor: string; scenarioMinor: string; correct: number; total: number };
-export type PracticeAttachment = { id: number; name: string; mimeType: string; dataUrl: string };
+export type PracticeAttachmentSummary = { id: number; name: string; mimeType: string };
+export type PracticeAttachment = PracticeAttachmentSummary & { dataUrl: string };
 export type PracticeAttachmentInput = { name: string; mimeType: string; dataUrl: string };
 
 type PracticeSessionRow = {
@@ -25,11 +26,13 @@ type ScenarioScoreRow = {
   correct: number;
   total: number;
 };
-type PracticeAttachmentRow = {
+type PracticeAttachmentSummaryRow = {
   id: number;
   practice_session_id: number;
   name: string;
   mime_type: string;
+};
+type PracticeAttachmentRow = PracticeAttachmentSummaryRow & {
   data_url: string;
 };
 
@@ -54,7 +57,9 @@ export type PracticeSessionInput = {
   attachments?: PracticeAttachmentInput[];
 } & Partial<LegacyMockExamInput>;
 
-export type PracticeSessionResult = {
+export type PracticeSessionResult<
+  TAttachment extends PracticeAttachmentSummary = PracticeAttachment,
+> = {
   id: number;
   practiceDate: string;
   testDate: string;
@@ -68,7 +73,7 @@ export type PracticeSessionResult = {
   part3: LegacyPartScore | null;
   part4: LegacyPartScore | null;
   scenarios: ScenarioScore[];
-  attachments: PracticeAttachment[];
+  attachments: TAttachment[];
 };
 
 function validateScore(label: string, score: { correct: number; total: number }) {
@@ -126,18 +131,21 @@ function validateAttachments(attachments: PracticeAttachmentInput[]) {
   }
 }
 
-function rowPart(result: PracticeSessionResult, part: 1 | 2 | 3 | 4): LegacyPartScore | null {
+function rowPart(
+  result: PracticeSessionResult<PracticeAttachmentSummary>,
+  part: 1 | 2 | 3 | 4,
+): LegacyPartScore | null {
   const score = result.parts.find((p) => p.part === part);
   return score ? { correct: score.correct, total: score.total } : null;
 }
 
-function buildResult(
+function buildResult<TAttachment extends PracticeAttachmentSummary>(
   row: PracticeSessionRow,
   parts: PartScore[],
   scenarios: ScenarioScore[],
-  attachments: PracticeAttachment[],
-): PracticeSessionResult {
-  const result: PracticeSessionResult = {
+  attachments: TAttachment[],
+): PracticeSessionResult<TAttachment> {
+  const result: PracticeSessionResult<TAttachment> = {
     id: row.id,
     practiceDate: row.practice_date,
     testDate: row.practice_date,
@@ -247,7 +255,46 @@ export async function replacePracticeAttachments(
   return saved;
 }
 
-export async function listMockExams(client: VercelClient): Promise<PracticeSessionResult[]> {
+function mapAttachment(row: PracticeAttachmentRow): PracticeAttachment {
+  return {
+    id: row.id,
+    name: row.name,
+    mimeType: row.mime_type,
+    dataUrl: row.data_url,
+  };
+}
+
+export async function getPracticeAttachments(
+  client: VercelClient,
+  practiceSessionId: number,
+): Promise<PracticeAttachment[]> {
+  const { rows } = await client.query<PracticeAttachmentRow>(
+    `SELECT id, practice_session_id, name, mime_type, data_url
+     FROM practice_session_attachments
+     WHERE practice_session_id = $1
+     ORDER BY id`,
+    [practiceSessionId],
+  );
+  return rows.map(mapAttachment);
+}
+
+export async function getPracticeAttachment(
+  client: VercelClient,
+  practiceSessionId: number,
+  attachmentId: number,
+): Promise<PracticeAttachment | null> {
+  const { rows } = await client.query<PracticeAttachmentRow>(
+    `SELECT id, practice_session_id, name, mime_type, data_url
+     FROM practice_session_attachments
+     WHERE practice_session_id = $1 AND id = $2`,
+    [practiceSessionId, attachmentId],
+  );
+  return rows[0] ? mapAttachment(rows[0]) : null;
+}
+
+export async function listMockExams(
+  client: VercelClient,
+): Promise<PracticeSessionResult<PracticeAttachmentSummary>[]> {
   const { rows } = await client.query<PracticeSessionRow>(
     'SELECT * FROM practice_sessions ORDER BY practice_date DESC, id DESC',
   );
@@ -268,8 +315,8 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
      ORDER BY practice_session_id, id`,
     [sessionIds],
   );
-  const { rows: attachmentRows } = await client.query<PracticeAttachmentRow>(
-    `SELECT id, practice_session_id, name, mime_type, data_url
+  const { rows: attachmentRows } = await client.query<PracticeAttachmentSummaryRow>(
+    `SELECT id, practice_session_id, name, mime_type
      FROM practice_session_attachments
      WHERE practice_session_id = ANY($1::int[])
      ORDER BY practice_session_id, id`,
@@ -295,14 +342,13 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
     scenariosBySession.set(score.practice_session_id, scores);
   }
 
-  const attachmentsBySession = new Map<number, PracticeAttachment[]>();
+  const attachmentsBySession = new Map<number, PracticeAttachmentSummary[]>();
   for (const attachment of attachmentRows) {
     const attachments = attachmentsBySession.get(attachment.practice_session_id) ?? [];
     attachments.push({
       id: attachment.id,
       name: attachment.name,
       mimeType: attachment.mime_type,
-      dataUrl: attachment.data_url,
     });
     attachmentsBySession.set(attachment.practice_session_id, attachments);
   }

@@ -170,7 +170,8 @@ describe('question review sessions', () => {
              (section, part, question_format, stem, option_a, option_b, option_c, option_d,
               correct_option, analysis, category_id)
            SELECT 'reading', 5, 'single_choice', $3,
-             'A', 'B', 'C', 'D', 'B', 'test', id FROM child RETURNING id
+             'A', 'B', 'C', 'D', 'B', 'test', id FROM child
+           RETURNING id, correct_option, analysis, notes
          ), review_session AS (
            INSERT INTO question_review_sessions (section, part, mode, planned_count)
            VALUES ('reading', 5, 'weak_first', 1) RETURNING id

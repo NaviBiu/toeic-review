@@ -10,7 +10,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: [],
-    testTimeout: 15000,
+    // Live Neon integration tests make several serial round trips per case,
+    // with the savepoint wrapper adding another round trip to every query.
+    // A 15-second ceiling flakes under normal non-pooled endpoint latency.
+    testTimeout: 60_000,
     // Integration tests each open their own Postgres connection against the
     // live Neon database. Running test files in parallel (Vitest's default)
     // exceeds Neon's free-tier connection limit and produces intermittent

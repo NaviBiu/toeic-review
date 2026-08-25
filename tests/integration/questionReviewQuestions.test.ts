@@ -361,11 +361,6 @@ describe('question review questions', () => {
         analysis: 'test', notes: null, source: null, category_id: 12, status: 'deleted',
       }] })
       .mockResolvedValueOnce({ rows: [{
-        id: 12, section: 'reading', part: 5, parent_id: 4, name: '未细分',
-        is_default: true, status: 'active', sort_order: 0, parent_status: 'active',
-        parent_section: 'reading', parent_part: 5, parent_parent_id: null,
-      }] })
-      .mockResolvedValueOnce({ rows: [{
         id: 33, section: 'reading', part: 5, question_format: 'single_choice', stem: input(12).stem,
         option_a: 'A', option_b: 'B', option_c: 'C', option_d: 'D', correct_option: 'A',
         analysis: 'test', notes: null, source: null, category_id: 12, status: 'learning',
