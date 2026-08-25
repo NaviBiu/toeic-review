@@ -358,7 +358,9 @@ export async function listCategoryTree(
        SELECT parent.id AS category_id, question.id AS question_id,
          question.status AS question_status, latest_attempt.is_correct
        FROM scoped_categories parent
-       JOIN scoped_categories child ON child.parent_id = parent.id
+       JOIN scoped_categories child
+         ON child.parent_id = parent.id
+        AND child.status = 'active'
        JOIN scoped_questions question
          ON question.category_id = child.id
         AND question.status IN ('learning', 'mastered')

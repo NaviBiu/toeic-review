@@ -7,6 +7,7 @@ import {
   mergeCategory,
   updateCategory,
 } from '@/lib/questionReview/categories';
+import { createReviewSession } from '@/lib/questionReview/sessions';
 import { withTestClient } from './setup';
 
 describe('question review categories', () => {
@@ -101,6 +102,193 @@ describe('question review categories', () => {
         'SELECT id FROM question_categories WHERE id = $1',
         [categories.empty_child_id],
       )).resolves.toMatchObject({ rows: [] });
+    });
+  }, 60_000);
+
+  it('deletes an empty root and default child while protecting non-empty roots', async () => {
+    await withTestClient(async (client) => {
+      const emptyRoot = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        name: '可删除空一级分类',
+      });
+      const questionRoot = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        name: '有题目一级分类',
+      });
+      const childRoot = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        name: '有自定义子分类一级分类',
+      });
+      const nonDefaultChild = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        parentId: childRoot.id,
+        name: '保留自定义子分类',
+      });
+      const { rows: defaults } = await client.query(
+        `SELECT id, parent_id
+         FROM question_categories
+         WHERE parent_id = ANY($1::int[]) AND is_default = true`,
+        [[emptyRoot.id, questionRoot.id, childRoot.id]],
+      );
+      const defaultByParent = new Map(defaults.map((row) => [row.parent_id, row.id]));
+      const emptyDefaultId = defaultByParent.get(emptyRoot.id)!;
+      const questionDefaultId = defaultByParent.get(questionRoot.id)!;
+      const childDefaultId = defaultByParent.get(childRoot.id)!;
+
+      await client.query(
+        `INSERT INTO review_questions
+           (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+            correct_option, analysis, category_id)
+         VALUES ('reading', 5, 'single_choice', 'Protected root question',
+           'A', 'B', 'C', 'D', 'A', 'test', $1)`,
+        [questionDefaultId],
+      );
+
+      await expect(deleteEmptyCategory(client, emptyRoot.id)).resolves.toBeUndefined();
+      const { rows: deletedRows } = await client.query(
+        'SELECT id FROM question_categories WHERE id = ANY($1::int[])',
+        [[emptyRoot.id, emptyDefaultId]],
+      );
+      expect(deletedRows).toEqual([]);
+
+      await expect(deleteEmptyCategory(client, questionRoot.id))
+        .rejects.toThrow('该分类仍有关联题目，请先移动或合并');
+      await expect(deleteEmptyCategory(client, childRoot.id))
+        .rejects.toThrow('该分类仍有子分类，请先移动或合并');
+
+      const { rows: protectedRows } = await client.query(
+        'SELECT id FROM question_categories WHERE id = ANY($1::int[]) ORDER BY id',
+        [[
+          questionRoot.id,
+          questionDefaultId,
+          childRoot.id,
+          childDefaultId,
+          nonDefaultChild.id,
+        ]],
+      );
+      expect(protectedRows.map((row) => row.id)).toEqual([
+        questionRoot.id,
+        questionDefaultId,
+        childRoot.id,
+        childDefaultId,
+        nonDefaultChild.id,
+      ].sort((left, right) => left - right));
+    });
+  }, 60_000);
+
+  it('hides inactive children and excludes their questions from active parent statistics', async () => {
+    await withTestClient(async (client) => {
+      const parent = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        name: '停用子分类统计一级分类',
+      });
+      const activeChild = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        parentId: parent.id,
+        name: '启用统计子分类',
+      });
+      const inactiveChild = await createCategory(client, {
+        section: 'reading',
+        part: 5,
+        parentId: parent.id,
+        name: '停用统计子分类',
+      });
+      await updateCategory(client, inactiveChild.id, { status: 'inactive' });
+
+      await client.query(
+        `WITH active_learning AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           VALUES ('reading', 5, 'single_choice', 'Active learning question',
+             'A', 'B', 'C', 'D', 'A', 'test', $1)
+           RETURNING id
+         ), active_mastered AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id, status)
+           VALUES ('reading', 5, 'single_choice', 'Active mastered question',
+             'A', 'B', 'C', 'D', 'A', 'test', $1, 'mastered')
+         ), inactive_learning AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id)
+           VALUES ('reading', 5, 'single_choice', 'Inactive learning question',
+             'A', 'B', 'C', 'D', 'A', 'test', $2)
+           RETURNING id
+         ), inactive_mastered AS (
+           INSERT INTO review_questions
+             (section, part, question_format, stem, option_a, option_b, option_c, option_d,
+              correct_option, analysis, category_id, status)
+           VALUES ('reading', 5, 'single_choice', 'Inactive mastered question',
+             'A', 'B', 'C', 'D', 'A', 'test', $2, 'mastered')
+         ), session AS (
+           INSERT INTO question_review_sessions (section, part, mode, planned_count)
+           VALUES ('reading', 5, 'weak_first', 2)
+           RETURNING id
+         ), session_items AS (
+           INSERT INTO question_review_session_items (session_id, question_id, position)
+           SELECT session.id, active_learning.id, 1 FROM session CROSS JOIN active_learning
+           UNION ALL
+           SELECT session.id, inactive_learning.id, 2 FROM session CROSS JOIN inactive_learning
+           RETURNING session_id, question_id, position
+         )
+         INSERT INTO question_attempts
+           (request_id, session_id, question_id, selected_option, is_correct, attempted_at)
+         SELECT '34333333-3333-4333-8333-333333333333'::uuid,
+           session_id, question_id, 'B', false, '2026-08-21T08:00:00Z'::timestamptz
+         FROM session_items WHERE position = 1
+         UNION ALL
+         SELECT '44444444-4444-4444-8444-444444444444'::uuid,
+           session_id, question_id, 'A', true, '2026-08-21T08:00:00Z'::timestamptz
+         FROM session_items WHERE position = 2`,
+        [activeChild.id, inactiveChild.id],
+      );
+
+      const activeTree = await listCategoryTree(client, { section: 'reading', part: 5 });
+      const activeParent = activeTree.find((node) => node.id === parent.id)!;
+      expect(activeParent.children.some((node) => node.id === inactiveChild.id)).toBe(false);
+      expect(activeParent.stats).toEqual({
+        total: 2,
+        learningCount: 1,
+        masteredCount: 1,
+        attempted: 1,
+        unattempted: 1,
+        latestCorrect: 0,
+        accuracy: 0,
+      });
+      const session = await createReviewSession(client, {
+        mode: 'weak_first',
+        categoryScopeId: parent.id,
+        includeMastered: true,
+        plannedCount: 10,
+      });
+      expect(session.actualCount).toBe(activeParent.stats.total);
+
+      const fullTree = await listCategoryTree(client, {
+        section: 'reading',
+        part: 5,
+        includeInactive: true,
+      });
+      const fullParent = fullTree.find((node) => node.id === parent.id)!;
+      const visibleInactiveChild = fullParent.children.find((node) => node.id === inactiveChild.id)!;
+      expect(fullParent.stats).toEqual(activeParent.stats);
+      expect(visibleInactiveChild.status).toBe('inactive');
+      expect(visibleInactiveChild.stats).toEqual({
+        total: 2,
+        learningCount: 1,
+        masteredCount: 1,
+        attempted: 1,
+        unattempted: 1,
+        latestCorrect: 1,
+        accuracy: 1,
+      });
     });
   }, 60_000);
 
