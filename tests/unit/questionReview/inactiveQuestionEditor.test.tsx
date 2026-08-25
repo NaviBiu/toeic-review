@@ -7,6 +7,11 @@ import Part5Workspace from '@/components/part5/Part5Workspace';
 import QuestionEditorModal from '@/components/part5/QuestionEditorModal';
 import type { CategoryNode, QuestionListItem } from '@/lib/questionReview/types';
 
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
 const emptyStats = {
   total: 0,
   learningCount: 0,
@@ -98,6 +103,18 @@ function jsonResponse(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
+function errorResponse(body: unknown, status = 503): Response {
+  return { ok: false, status, json: async () => body } as Response;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 async function render(component: React.ReactNode) {
   await act(async () => {
     root.render(component);
@@ -176,6 +193,97 @@ describe('inactive category question editing', () => {
       .filter((url) => url.startsWith('/api/question-categories'));
     expect(categoryRequests[0]).toBe('/api/question-categories?section=reading&part=5');
     expect(categoryRequests).toContain('/api/question-categories?section=reading&part=5&includeInactive=true');
+    expect(selectFor('二级分类').value).toBe('12');
+  });
+
+  it('keeps the editor closed after an inclusive-category failure and retries visibly', async () => {
+    const editedQuestion = question(12);
+    let inclusiveRequests = 0;
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = String(request);
+      if (url.includes('includeInactive=true')) {
+        inclusiveRequests += 1;
+        return Promise.resolve(inclusiveRequests === 1
+          ? errorResponse({ error: '编辑分类加载失败' })
+          : jsonResponse(inactiveChildCategories));
+      }
+      if (url.startsWith('/api/review-questions?')) {
+        return Promise.resolve(jsonResponse({ items: [editedQuestion], total: 1 }));
+      }
+      return Promise.resolve(jsonResponse(activeCategories));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await render(<Part5Workspace />);
+    await flush();
+    await flush();
+
+    const edit = [...host.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    if (!edit) throw new Error('Edit button not found');
+    await act(async () => edit.click());
+    await flush();
+
+    expect(host.querySelector('[role="dialog"] form')).toBeNull();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('编辑分类加载失败');
+    const retry = [...host.querySelectorAll('button')].find((button) => button.textContent === '重试');
+    if (!retry) throw new Error('Retry button not found');
+
+    await act(async () => retry.click());
+    await flush();
+
+    expect(selectFor('二级分类').value).toBe('12');
+    expect(inclusiveRequests).toBe(2);
+  });
+
+  it('ignores an older inclusive response after the loading modal is closed and reopened', async () => {
+    const editedQuestion = question(12);
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const inclusiveSignals: AbortSignal[] = [];
+    let inclusiveRequests = 0;
+    const fetchMock = vi.fn((request: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(request);
+      if (url.includes('includeInactive=true')) {
+        inclusiveSignals.push(init?.signal as AbortSignal);
+        inclusiveRequests += 1;
+        return inclusiveRequests === 1 ? first.promise : second.promise;
+      }
+      if (url.startsWith('/api/review-questions?')) {
+        return Promise.resolve(jsonResponse({ items: [editedQuestion], total: 1 }));
+      }
+      return Promise.resolve(jsonResponse(activeCategories));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await render(<Part5Workspace />);
+    await flush();
+    await flush();
+
+    const edit = [...host.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    if (!edit) throw new Error('Edit button not found');
+    await act(async () => edit.click());
+    await flush();
+    expect(host.querySelector('[role="dialog"] form')).toBeNull();
+
+    const close = host.querySelector<HTMLButtonElement>('button[aria-label="关闭"]');
+    if (!close) throw new Error('Close button not found');
+    await act(async () => close.click());
+    expect(inclusiveSignals[0].aborted).toBe(true);
+
+    await act(async () => edit.click());
+    await flush();
+    expect(host.querySelector('[role="dialog"] form')).toBeNull();
+
+    await act(async () => {
+      second.resolve(jsonResponse(inactiveChildCategories));
+      await second.promise;
+    });
+    expect(selectFor('二级分类').value).toBe('12');
+
+    await act(async () => {
+      first.resolve(jsonResponse(activeCategories));
+      await first.promise;
+    });
     expect(selectFor('二级分类').value).toBe('12');
   });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Modal from '@/components/Modal';
 import type { CategoryNode, CreateSessionInput, QuestionListItem, SessionQuestion } from '@/lib/questionReview/types';
 import CategoryManager from './CategoryManager';
 import QuestionEditorModal from './QuestionEditorModal';
@@ -39,12 +40,19 @@ function formatAccuracy(latestCorrect: number, attempted: number) {
   return attempted === 0 ? '—' : `${Math.round((latestCorrect / attempted) * 100)}%`;
 }
 
+function includesCategory(categories: CategoryNode[], categoryId: number) {
+  return categories.some((parent) => parent.children.some((child) => child.id === categoryId));
+}
+
 export default function Part5Workspace() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('library');
   const [categoryRefreshVersion, setCategoryRefreshVersion] = useState(0);
   const [questionRefreshVersion, setQuestionRefreshVersion] = useState(0);
   const [editorQuestion, setEditorQuestion] = useState<QuestionListItem | null | undefined>(undefined);
   const [editorCategories, setEditorCategories] = useState<CategoryNode[] | null>(null);
+  const [editorCategoryLoading, setEditorCategoryLoading] = useState(false);
+  const [editorCategoryError, setEditorCategoryError] = useState('');
+  const [editorCategoryRequestVersion, setEditorCategoryRequestVersion] = useState(0);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [categoriesState, setCategoriesState] = useState<CategoryLoadState>(() => beginCategoryRefresh(null));
   const [starting, setStarting] = useState(false);
@@ -85,13 +93,22 @@ export default function Part5Workspace() {
         return body as CategoryNode[];
       })
       .then((nextCategories) => {
-        if (!controller.signal.aborted) setEditorCategories(nextCategories);
+        if (controller.signal.aborted) return;
+        if (!includesCategory(nextCategories, editorQuestion.categoryId)) {
+          throw new Error('原分类加载失败，请重试');
+        }
+        setEditorCategories(nextCategories);
+        setEditorCategoryLoading(false);
+        setEditorCategoryError('');
       })
-      .catch(() => {
-        // The existing active tree remains usable for active-category questions.
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setEditorCategories(null);
+        setEditorCategoryLoading(false);
+        setEditorCategoryError(error instanceof Error ? error.message : '编辑器分类加载失败，请重试');
       });
     return () => controller.abort();
-  }, [editorOpen, editorQuestion]);
+  }, [editorCategoryRequestVersion, editorOpen, editorQuestion]);
 
   const categories = categoriesState.categories;
   const summary = useMemo(
@@ -124,13 +141,24 @@ export default function Part5Workspace() {
   }
 
   function openEditor(question: QuestionListItem | null) {
-    setEditorCategories(categories);
+    setEditorCategories(question === null ? categories : null);
+    setEditorCategoryLoading(question !== null);
+    setEditorCategoryError('');
     setEditorQuestion(question);
   }
 
   function closeEditor() {
     setEditorQuestion(undefined);
     setEditorCategories(null);
+    setEditorCategoryLoading(false);
+    setEditorCategoryError('');
+  }
+
+  function retryEditorCategories() {
+    setEditorCategories(null);
+    setEditorCategoryLoading(true);
+    setEditorCategoryError('');
+    setEditorCategoryRequestVersion((version) => version + 1);
   }
 
   function handleQuestionChanged() {
@@ -207,7 +235,24 @@ export default function Part5Workspace() {
           ) : null}
         </section>
       </>}
-      {categories && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={editorCategories ?? categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
+      {categories && editorOpen && editorQuestion !== null && editorCategories === null ? (
+        <Modal open onClose={closeEditor} title={`编辑题目 #${editorQuestion.id}`} size="sm" compact>
+          {editorCategoryLoading ? (
+            <p role="status" className="py-5 text-sm text-stone-600">正在加载题目分类…</p>
+          ) : (
+            <div>
+              <p role="alert" className="border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {editorCategoryError || '编辑器分类加载失败，请重试'}
+              </p>
+              <div className="mt-4 flex justify-end gap-3">
+                <button type="button" onClick={closeEditor} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100">取消</button>
+                <button type="button" onClick={retryEditorCategories} className="rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700">重试</button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      ) : null}
+      {categories && editorOpen && (editorQuestion === null || editorCategories !== null) ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={editorCategories ?? categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
     </div>
   );
 }
