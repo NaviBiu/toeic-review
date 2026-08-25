@@ -29,10 +29,12 @@ function findParent(categories: CategoryNode[], categoryId: number | null) {
 }
 
 function draftFromQuestion(question: ReviewQuestion | null, categories: CategoryNode[]): QuestionDraft {
-  const parent = findParent(categories, question?.categoryId ?? null) ?? activeParents(categories)[0] ?? null;
-  const child = parent?.children.find((item) => item.id === question?.categoryId)
-    ?? parent?.children.find((item) => item.status === 'active')
-    ?? null;
+  const parent = question
+    ? findParent(categories, question.categoryId)
+    : activeParents(categories)[0] ?? null;
+  const child = question
+    ? parent?.children.find((item) => item.id === question.categoryId) ?? null
+    : parent?.children.find((item) => item.status === 'active') ?? null;
   return {
     stem: question?.stem ?? '',
     options: question?.options ?? { A: '', B: '', C: '', D: '' },
@@ -41,7 +43,7 @@ function draftFromQuestion(question: ReviewQuestion | null, categories: Category
     notes: question?.notes ?? '',
     source: question?.source ?? '',
     parentId: parent?.id ?? null,
-    categoryId: child?.id ?? null,
+    categoryId: question?.categoryId ?? child?.id ?? null,
     status: question?.status ?? 'learning',
   };
 }
@@ -70,10 +72,13 @@ export default function QuestionEditorModal({
   const [duplicateId, setDuplicateId] = useState<number | null>(null);
 
   const selectedParent = useMemo(
-    () => categories.find((parent) => parent.id === draft.parentId) ?? null,
-    [categories, draft.parentId],
+    () => categories.find((parent) => parent.id === draft.parentId)
+      ?? (initialQuestion && draft.categoryId === initialQuestion.categoryId
+        ? findParent(categories, draft.categoryId)
+        : null),
+    [categories, draft.categoryId, draft.parentId, initialQuestion],
   );
-  const childCategories = selectedParent?.children.filter((child) => child.status === 'active') ?? [];
+  const childCategories = selectedParent?.children ?? [];
 
   function updateDraft(fields: Partial<QuestionDraft>) {
     setDraft((current) => ({ ...current, ...fields }));
@@ -182,15 +187,27 @@ export default function QuestionEditorModal({
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-medium text-stone-800">一级分类
-            <select value={draft.parentId ?? ''} onChange={(event) => handleParentChange(event.target.value)} required className="mt-2 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900">
+            <select value={selectedParent?.id ?? draft.parentId ?? ''} onChange={(event) => handleParentChange(event.target.value)} required className="mt-2 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900">
               <option value="" disabled>选择一级分类</option>
-              {activeParents(categories).map((parent) => <option key={parent.id} value={parent.id}>{parent.name}</option>)}
+              {categories.map((parent) => (
+                <option key={parent.id} value={parent.id} disabled={parent.status !== 'active'}>
+                  {parent.name}{parent.status === 'inactive' ? '（已停用）' : ''}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block text-sm font-medium text-stone-800">二级分类
             <select value={draft.categoryId ?? ''} onChange={(event) => updateDraft({ categoryId: event.target.value ? Number(event.target.value) : null })} required disabled={childCategories.length === 0} className="mt-2 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 disabled:bg-stone-100">
               <option value="" disabled>选择二级分类</option>
-              {childCategories.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
+              {childCategories.map((child) => {
+                const parentInactive = selectedParent?.status === 'inactive';
+                const inactive = child.status === 'inactive' || parentInactive;
+                return (
+                  <option key={child.id} value={child.id} disabled={inactive}>
+                    {child.name}{child.status === 'inactive' ? '（已停用）' : parentInactive ? '（父分类已停用）' : ''}
+                  </option>
+                );
+              })}
             </select>
           </label>
         </div>

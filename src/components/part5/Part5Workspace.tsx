@@ -44,6 +44,7 @@ export default function Part5Workspace() {
   const [categoryRefreshVersion, setCategoryRefreshVersion] = useState(0);
   const [questionRefreshVersion, setQuestionRefreshVersion] = useState(0);
   const [editorQuestion, setEditorQuestion] = useState<QuestionListItem | null | undefined>(undefined);
+  const [editorCategories, setEditorCategories] = useState<CategoryNode[] | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [categoriesState, setCategoriesState] = useState<CategoryLoadState>(() => beginCategoryRefresh(null));
   const [starting, setStarting] = useState(false);
@@ -71,6 +72,26 @@ export default function Part5Workspace() {
       });
     return () => controller.abort();
   }, [categoryRefreshVersion]);
+
+  useEffect(() => {
+    if (!editorOpen || editorQuestion === null) return;
+    const controller = new AbortController();
+    fetch('/api/question-categories?section=reading&part=5&includeInactive=true', {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error ?? '编辑器分类加载失败，请重试');
+        return body as CategoryNode[];
+      })
+      .then((nextCategories) => {
+        if (!controller.signal.aborted) setEditorCategories(nextCategories);
+      })
+      .catch(() => {
+        // The existing active tree remains usable for active-category questions.
+      });
+    return () => controller.abort();
+  }, [editorOpen, editorQuestion]);
 
   const categories = categoriesState.categories;
   const summary = useMemo(
@@ -103,11 +124,13 @@ export default function Part5Workspace() {
   }
 
   function openEditor(question: QuestionListItem | null) {
+    setEditorCategories(categories);
     setEditorQuestion(question);
   }
 
   function closeEditor() {
     setEditorQuestion(undefined);
+    setEditorCategories(null);
   }
 
   function handleQuestionChanged() {
@@ -184,7 +207,7 @@ export default function Part5Workspace() {
           ) : null}
         </section>
       </>}
-      {categories && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
+      {categories && editorOpen ? <QuestionEditorModal questionId={editorQuestion?.id ?? null} initialQuestion={editorQuestion ?? null} categories={editorCategories ?? categories} open onClose={closeEditor} onSaved={handleQuestionChanged} /> : null}
     </div>
   );
 }

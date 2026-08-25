@@ -72,6 +72,7 @@ describe('question validation', () => {
 
   it.each([
     [{ ...activeChild, status: 'inactive' }, '分类已停用'],
+    [{ ...activeChild, parent_status: 'inactive' }, '分类已停用'],
     [{ ...activeChild, parent_id: null }, '题目必须归属二级分类'],
     [{ ...activeChild, part: 6 }, '分类范围不一致'],
     [{ ...activeChild, parent_parent_id: 1 }, '题目必须归属二级分类'],
@@ -82,13 +83,39 @@ describe('question validation', () => {
     );
   });
 
-  it('validates an unchanged category before restoring a question', async () => {
-    await expect(updateQuestion(clientWith(
-      [currentQuestion],
-      [{ ...activeChild, status: 'inactive' }],
-    ), currentQuestion.id, { status: 'learning' })).rejects.toEqual(
-      expect.objectContaining<QuestionError>({ message: '分类已停用' }),
-    );
+  it('allows a status-only update that retains an inactive category', async () => {
+    const restoredQuestion = { ...currentQuestion, status: 'learning' };
+    const client = clientWith([currentQuestion], [restoredQuestion]);
+
+    await expect(updateQuestion(client, currentQuestion.id, { status: 'learning' }))
+      .resolves.toMatchObject({ duplicate: false, question: { status: 'learning', categoryId: 12 } });
+    expect(vi.mocked(client.query)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(client.query).mock.calls[1][0]).toContain('UPDATE review_questions');
+  });
+
+  it('allows content updates that explicitly retain an inactive original category', async () => {
+    const updatedQuestion = { ...currentQuestion, analysis: '更新后的考点分析' };
+    const client = clientWith([currentQuestion], [updatedQuestion]);
+
+    await expect(updateQuestion(client, currentQuestion.id, {
+      analysis: '更新后的考点分析',
+      categoryId: currentQuestion.category_id,
+    })).resolves.toMatchObject({
+      duplicate: false,
+      question: { analysis: '更新后的考点分析', categoryId: 12 },
+    });
+    expect(vi.mocked(client.query)).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { ...activeChild, id: 13, status: 'inactive' },
+    { ...activeChild, id: 14, parent_status: 'inactive' },
+  ])('rejects an explicit category change to an inactive category', async (inactiveCategory) => {
+    await expect(updateQuestion(
+      clientWith([currentQuestion], [inactiveCategory]),
+      currentQuestion.id,
+      { categoryId: inactiveCategory.id },
+    )).rejects.toEqual(expect.objectContaining<QuestionError>({ message: '分类已停用' }));
   });
 
   it('rejects blank analysis when patching a question', async () => {
@@ -137,15 +164,14 @@ describe('question repository', () => {
   it('locks a changed stem before duplicate lookup during an update', async () => {
     const client = clientWith(
       [currentQuestion],
-      [activeChild],
       [],
       [{ id: 35 }],
     );
     await expect(updateQuestion(client, currentQuestion.id, {
       stem: 'A newly shared stem',
     })).resolves.toEqual({ duplicate: true, duplicateId: 35 });
-    expect(vi.mocked(client.query).mock.calls[2][0]).toContain('pg_advisory_xact_lock');
-    expect(vi.mocked(client.query).mock.calls[3][0]).toContain('SELECT id FROM review_questions');
+    expect(vi.mocked(client.query).mock.calls[1][0]).toContain('pg_advisory_xact_lock');
+    expect(vi.mocked(client.query).mock.calls[2][0]).toContain('SELECT id FROM review_questions');
   });
 
   it('commits a saved POST and rolls back duplicate, conflict, and unexpected POST failures', async () => {
@@ -212,7 +238,6 @@ describe('question repository', () => {
     client.query
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [currentQuestion] })
-      .mockResolvedValueOnce({ rows: [activeChild] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: 35 }] })
       .mockResolvedValueOnce({ rows: [] });
@@ -227,7 +252,6 @@ describe('question repository', () => {
     client.query.mockReset()
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [currentQuestion] })
-      .mockResolvedValueOnce({ rows: [activeChild] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ ...currentQuestion, stem: 'A newly shared stem' }] })

@@ -265,7 +265,9 @@ export async function updateQuestion(
     : null;
   const status = fields.status === undefined ? current.status : validateStatus(fields.status);
 
-  await validateCategory(client, values?.categoryId ?? current.categoryId);
+  if (fields.categoryId !== undefined && fields.categoryId !== current.categoryId) {
+    await validateCategory(client, values!.categoryId);
+  }
   if (fields.stem !== undefined) {
     await lockDuplicateStem(client, values!.stem);
     const duplicateId = await findDuplicate(client, values!.stem, id);
