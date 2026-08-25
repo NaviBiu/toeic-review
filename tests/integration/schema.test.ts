@@ -14,40 +14,70 @@ describe('schema constraints', () => {
     if (!migrationExists) return;
 
     const sql = readFileSync(migrationPath, 'utf8');
-    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS correct_option_snapshot TEXT/);
-    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS analysis_snapshot TEXT/);
-    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS notes_snapshot TEXT/);
-    expect(sql).toMatch(
-      /UPDATE question_review_session_items AS item[\s\S]*FROM review_questions AS question/,
-    );
-    expect(sql).toMatch(/CHECK \(correct_option_snapshot IN \('A', 'B', 'C', 'D'\)\) NOT VALID/);
-    expect(sql).toContain('VALIDATE CONSTRAINT question_review_session_items_correct_option_snapshot_check');
-    expect(sql).toContain('ALTER COLUMN correct_option_snapshot SET NOT NULL');
-    expect(sql).toContain('ALTER COLUMN analysis_snapshot SET NOT NULL');
-    expect(sql).toContain('CREATE OR REPLACE FUNCTION set_question_review_session_item_snapshots()');
-    expect(sql).toContain('CREATE TRIGGER question_review_session_items_set_snapshots');
-    expect(sql).toMatch(
-      /BEFORE INSERT ON question_review_session_items[\s\S]*set_question_review_session_item_snapshots\(\)/,
-    );
-
     const transactions = sql.match(/BEGIN;[\s\S]*?COMMIT;/g) ?? [];
+    expect(sql.match(/^BEGIN;$/gm)).toHaveLength(5);
+    expect(sql.match(/^COMMIT;$/gm)).toHaveLength(5);
     expect(transactions).toHaveLength(5);
-    expect(transactions[0]).toContain('ADD COLUMN IF NOT EXISTS correct_option_snapshot');
-    expect(transactions[0]).toContain('CREATE TRIGGER question_review_session_items_set_snapshots');
-    expect(transactions[0]).not.toContain('UPDATE question_review_session_items AS item');
-    expect(transactions[1]).toContain('UPDATE question_review_session_items AS item');
-    expect(transactions[1]).not.toContain('SET NOT NULL');
-    expect(transactions[2]).toContain('ADD CONSTRAINT');
-    expect(transactions[2]).not.toContain('VALIDATE CONSTRAINT');
-    expect(transactions[3]).toContain('VALIDATE CONSTRAINT');
-    expect(transactions[3]).not.toContain('SET NOT NULL');
-    expect(transactions[4]).toContain('ALTER COLUMN correct_option_snapshot SET NOT NULL');
-    expect(sql.indexOf(transactions[0])).toBeLessThan(sql.indexOf(transactions[1]));
-    expect(sql.indexOf(transactions[1])).toBeLessThan(sql.indexOf(transactions[2]));
-    expect(sql.indexOf(transactions[2])).toBeLessThan(sql.indexOf(transactions[3]));
-    expect(sql.indexOf(transactions[3])).toBeLessThan(sql.indexOf(transactions[4]));
-    expect(sql).toContain('DROP TRIGGER IF EXISTS question_review_session_items_set_snapshots');
-    expect(sql).toContain('DROP CONSTRAINT IF EXISTS question_review_session_items_correct_option_snapshot_not_null');
+
+    const [expansion, backfill, constraintRegistration, validation, enforcement] = transactions;
+    expect(expansion).toContain('ADD COLUMN IF NOT EXISTS correct_option_snapshot TEXT');
+    expect(expansion).toContain('ADD COLUMN IF NOT EXISTS analysis_snapshot TEXT');
+    expect(expansion).toContain('ADD COLUMN IF NOT EXISTS notes_snapshot TEXT');
+    expect(expansion).toMatch(
+      /SELECT question\.correct_option, question\.analysis, question\.notes\s+INTO NEW\.correct_option_snapshot, NEW\.analysis_snapshot, NEW\.notes_snapshot\s+FROM review_questions AS question/,
+    );
+    expect(expansion).toMatch(
+      /CREATE TRIGGER question_review_session_items_set_snapshots\s+BEFORE INSERT ON question_review_session_items[\s\S]*EXECUTE FUNCTION set_question_review_session_item_snapshots\(\)/,
+    );
+    expect(expansion).toContain('DROP TRIGGER IF EXISTS question_review_session_items_set_snapshots');
+    expect(expansion).not.toContain('UPDATE question_review_session_items AS item');
+
+    expect(backfill).toMatch(
+      /UPDATE question_review_session_items AS item\s+SET correct_option_snapshot = question\.correct_option,\s+analysis_snapshot = question\.analysis,\s+notes_snapshot = question\.notes\s+FROM review_questions AS question\s+WHERE question\.id = item\.question_id\s+AND \(item\.correct_option_snapshot IS NULL OR item\.analysis_snapshot IS NULL\);/,
+    );
+    expect(backfill).not.toContain('item.notes_snapshot IS NULL');
+    expect(backfill).not.toContain('SET NOT NULL');
+
+    expect(constraintRegistration).toMatch(
+      /IF NOT EXISTS \(\s*SELECT 1\s*FROM pg_constraint\s*WHERE conname = 'question_review_session_items_correct_option_snapshot_not_null'\s+AND conrelid = 'question_review_session_items'::regclass\s*\) THEN\s*ALTER TABLE question_review_session_items\s+ADD CONSTRAINT question_review_session_items_correct_option_snapshot_not_null\s+CHECK \(correct_option_snapshot IS NOT NULL\) NOT VALID;/,
+    );
+    expect(constraintRegistration).toMatch(
+      /IF NOT EXISTS \(\s*SELECT 1\s*FROM pg_constraint\s*WHERE conname = 'question_review_session_items_analysis_snapshot_not_null'\s+AND conrelid = 'question_review_session_items'::regclass\s*\) THEN\s*ALTER TABLE question_review_session_items\s+ADD CONSTRAINT question_review_session_items_analysis_snapshot_not_null\s+CHECK \(analysis_snapshot IS NOT NULL\) NOT VALID;/,
+    );
+    expect(constraintRegistration).toMatch(
+      /IF NOT EXISTS \(\s*SELECT 1\s*FROM pg_constraint\s*WHERE conname = 'question_review_session_items_correct_option_snapshot_check'\s+AND conrelid = 'question_review_session_items'::regclass\s*\) THEN\s*ALTER TABLE question_review_session_items\s+ADD CONSTRAINT question_review_session_items_correct_option_snapshot_check\s+CHECK \(correct_option_snapshot IN \('A', 'B', 'C', 'D'\)\) NOT VALID;/,
+    );
+    expect(constraintRegistration).not.toContain('VALIDATE CONSTRAINT');
+
+    expect(validation).toContain(
+      'VALIDATE CONSTRAINT question_review_session_items_correct_option_snapshot_not_null',
+    );
+    expect(validation).toContain(
+      'VALIDATE CONSTRAINT question_review_session_items_analysis_snapshot_not_null',
+    );
+    expect(validation).not.toContain('SET NOT NULL');
+
+    const correctSetNotNull = enforcement.indexOf(
+      'ALTER COLUMN correct_option_snapshot SET NOT NULL',
+    );
+    const analysisSetNotNull = enforcement.indexOf('ALTER COLUMN analysis_snapshot SET NOT NULL');
+    const correctHelperDrop = enforcement.indexOf(
+      'DROP CONSTRAINT IF EXISTS question_review_session_items_correct_option_snapshot_not_null',
+    );
+    const analysisHelperDrop = enforcement.indexOf(
+      'DROP CONSTRAINT IF EXISTS question_review_session_items_analysis_snapshot_not_null',
+    );
+    expect(correctSetNotNull).toBeGreaterThan(-1);
+    expect(analysisSetNotNull).toBeGreaterThan(-1);
+    expect(correctHelperDrop).toBeGreaterThan(correctSetNotNull);
+    expect(correctHelperDrop).toBeGreaterThan(analysisSetNotNull);
+    expect(analysisHelperDrop).toBeGreaterThan(correctSetNotNull);
+    expect(analysisHelperDrop).toBeGreaterThan(analysisSetNotNull);
+
+    expect(sql.indexOf(expansion)).toBeLessThan(sql.indexOf(backfill));
+    expect(sql.indexOf(backfill)).toBeLessThan(sql.indexOf(constraintRegistration));
+    expect(sql.indexOf(constraintRegistration)).toBeLessThan(sql.indexOf(validation));
+    expect(sql.indexOf(validation)).toBeLessThan(sql.indexOf(enforcement));
   });
 
   it('seeds six active Part 5 category trees with default children', async () => {

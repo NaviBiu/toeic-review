@@ -78,6 +78,29 @@ Follow-up verification:
 - `npm.cmd run lint -- tests/integration/schema.test.ts tests/unit/questionReview/sessions.test.ts src/lib/questionReview/sessions.ts`
   - Passed.
 
+## Migration Safeguard Coverage Follow-Up
+
+- Strengthened the migration text test to assert that the compatibility trigger copies
+  `correct_option`, `analysis`, and `notes` from `review_questions` into the three snapshot fields.
+- Asserted the complete backfill statement, including its required-snapshot null predicate, so
+  reruns skip rows with established grading snapshots and nullable notes do not trigger rewrites.
+- Asserted full `pg_constraint` catalog guards for the option check and both non-null helper
+  constraints, including exact `NOT VALID` definitions for correct option and analysis.
+- Asserted both helper constraints are validated in the validation phase before both columns are
+  made non-null, and that both helpers are dropped only after enforcement.
+- Kept exact five-transaction `BEGIN`/`COMMIT` counts and phase ordering assertions.
+- No production migration change was required; every strengthened assertion passed against the
+  existing phased migration.
+
+Coverage follow-up verification:
+
+- `npm.cmd test -- tests/integration/schema.test.ts -t "defines a safely backfilled grading snapshot migration"`
+  - Passed: 1 test, 9 skipped.
+- `npm.cmd test -- tests/unit/questionReview/sessions.test.ts`
+  - Passed: 1 file, 13 tests.
+- `npm.cmd run lint -- tests/integration/schema.test.ts`
+  - Passed.
+
 ## Verification Limits
 
 - No database/model calls, migration application, or development server were run, as requested.
