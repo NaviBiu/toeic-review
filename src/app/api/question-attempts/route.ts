@@ -45,22 +45,10 @@ export async function POST(req: NextRequest) {
 
   const client = createClient();
   await client.connect();
-  let transactionOpen = false;
   try {
-    await client.query('BEGIN');
-    transactionOpen = true;
     const attempt = await submitAttempt(client, input);
-    await client.query('COMMIT');
-    transactionOpen = false;
     return NextResponse.json(attempt, { status: 201 });
   } catch (error) {
-    if (transactionOpen) {
-      try {
-        await client.query('ROLLBACK');
-      } catch {
-        // Preserve the original submission error if rollback also fails.
-      }
-    }
     return sessionErrorResponse(error);
   } finally {
     await client.end();

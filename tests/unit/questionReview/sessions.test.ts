@@ -12,7 +12,6 @@ const input = {
   durationMs: 9000,
 };
 
-const question = { correct_option: 'B', analysis: 'test', notes: null };
 const storedAttempt = {
   id: 40,
   session_id: input.sessionId,
@@ -69,6 +68,42 @@ describe('session route input', () => {
     }));
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('attempt submission route', () => {
+  it('avoids extra transaction queries around the idempotent submission', async () => {
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      end: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    };
+    const submitAttempt = vi.fn().mockResolvedValue({
+      attemptId: 40,
+      isCorrect: false,
+      correctOption: 'B',
+      analysis: 'test',
+      notes: null,
+      durationMs: 9000,
+      durationExcluded: false,
+      stats: { correctCount: 0, wrongCount: 1, latestCorrect: false, latestDurationMs: 9000 },
+    });
+    class SessionError extends Error {
+      kind = 'conflict' as const;
+    }
+    vi.doMock('@/lib/db', () => ({ createClient: () => client }));
+    vi.doMock('@/lib/questionReview/sessions', () => ({ submitAttempt, SessionError }));
+    const { POST } = await import('@/app/api/question-attempts/route');
+
+    const response = await POST(new NextRequest('http://localhost/api/question-attempts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }));
+
+    expect(response.status).toBe(201);
+    expect(submitAttempt).toHaveBeenCalledOnce();
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.end).toHaveBeenCalledOnce();
   });
 });
 
@@ -132,8 +167,6 @@ describe('session creation', () => {
 describe('session grading snapshots', () => {
   it('grades submission from the session item snapshot', async () => {
     const client = clientWith(
-      [question],
-      [],
       [storedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
     );
@@ -149,15 +182,13 @@ describe('session grading snapshots', () => {
 
   it('returns the session item snapshot for an idempotent retry', async () => {
     const client = clientWith(
-      [question],
-      [],
       [storedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
     );
 
     await submitAttempt(client, input);
 
-    const retryLookupSql = String(vi.mocked(client.query).mock.calls[2][0]);
+    const retryLookupSql = String(vi.mocked(client.query).mock.calls[0][0]);
     expect(retryLookupSql).toContain('item.correct_option_snapshot AS correct_option');
     expect(retryLookupSql).toContain('item.analysis_snapshot AS analysis');
     expect(retryLookupSql).toContain('item.notes_snapshot AS notes');
@@ -189,10 +220,23 @@ describe('session grading snapshots', () => {
 });
 
 describe('attempt idempotency', () => {
+  it('submits an answer and returns its stats in two database round trips', async () => {
+    const client = clientWith(
+      [storedAttempt],
+      [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
+    );
+
+    await expect(submitAttempt(client, input)).resolves.toMatchObject({ attemptId: 40 });
+
+    expect(client.query).toHaveBeenCalledTimes(2);
+    const submissionSql = String(vi.mocked(client.query).mock.calls[0][0]);
+    expect(submissionSql).toContain('WITH session_question AS');
+    expect(submissionSql).toContain('INSERT INTO question_attempts');
+    expect(submissionSql).toContain('DO UPDATE SET request_id = EXCLUDED.request_id');
+  });
+
   it('returns the existing attempt for the identical payload', async () => {
     const client = clientWith(
-      [question],
-      [],
       [storedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
     );
@@ -200,24 +244,20 @@ describe('attempt idempotency', () => {
     await expect(submitAttempt(client, input)).resolves.toMatchObject({
       attemptId: 40, durationMs: 9000, isCorrect: false,
     });
-    expect(vi.mocked(client.query).mock.calls[1][0]).toContain('submitted_duration_ms');
-    expect(vi.mocked(client.query).mock.calls[1][1]).toEqual([
-      input.requestId, input.sessionId, input.questionId, input.selectedOption, false, input.durationMs,
+    expect(vi.mocked(client.query).mock.calls[0][0]).toContain('submitted_duration_ms');
+    expect(vi.mocked(client.query).mock.calls[0][1]).toEqual([
+      input.requestId, input.sessionId, input.questionId, input.selectedOption, input.durationMs,
     ]);
   });
 
   it('uses the original submitted duration after a timing edit', async () => {
     const editedAttempt = { ...storedAttempt, duration_ms: 12500 };
     const client = clientWith(
-      [question],
-      [],
       [storedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 9000 }],
       [{ id: storedAttempt.id }],
       [editedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 12500 }],
-      [question],
-      [],
       [editedAttempt],
       [{ correct_count: 0, wrong_count: 1, latest_correct: false, latest_duration_ms: 12500 }],
     );
@@ -235,7 +275,7 @@ describe('attempt idempotency', () => {
     ['a different selected option', { ...storedAttempt, selected_option: 'B' }],
     ['a different duration', { ...storedAttempt, submitted_duration_ms: 9001 }],
   ])('rejects an idempotency key reused with %s', async (_label, conflictingAttempt) => {
-    await expect(submitAttempt(clientWith([question], [], [conflictingAttempt]), input))
+    await expect(submitAttempt(clientWith([conflictingAttempt]), input))
       .rejects.toThrow('请求标识已用于其他作答');
   });
 });

@@ -240,7 +240,7 @@ export default function Part5Workspace() {
         </section>
       </>}
       {categories && editorOpen && editorQuestion !== null && editorCategories === null ? (
-        <Modal open onClose={closeEditor} title={`编辑题目 #${editorQuestion.id}`} size="sm" compact>
+        <Modal open onClose={closeEditor} title="编辑题目" size="sm" compact>
           {editorCategoryLoading ? (
             <p role="status" className="py-5 text-sm text-stone-600">正在加载题目分类…</p>
           ) : (

@@ -167,6 +167,32 @@ afterEach(async () => {
 });
 
 describe('inactive category question editing', () => {
+  it('does not expose internal database IDs in question labels', async () => {
+    const editedQuestion = question(12);
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = String(request);
+      if (url.includes('includeInactive=true')) return Promise.resolve(jsonResponse(inactiveChildCategories));
+      if (url.startsWith('/api/review-questions?')) {
+        return Promise.resolve(jsonResponse({ items: [editedQuestion], total: 1 }));
+      }
+      return Promise.resolve(jsonResponse(activeCategories));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await render(<Part5Workspace />);
+    await flush();
+    await flush();
+
+    expect(host.textContent).not.toContain('#101');
+    const edit = [...host.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    if (!edit) throw new Error('Edit button not found');
+    await act(async () => edit.click());
+    await flush();
+
+    expect(host.querySelector('[role="dialog"]')?.textContent).not.toContain('#101');
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('编辑题目');
+  });
+
   it('loads inactive editor categories without changing the active first-load tree', async () => {
     const editedQuestion = question(12);
     const fetchMock = vi.fn((request: RequestInfo | URL) => {

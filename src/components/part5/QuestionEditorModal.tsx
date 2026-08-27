@@ -158,7 +158,7 @@ export default function QuestionEditorModal({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={questionId === null ? '新增 Part 5 题目' : `编辑题目 #${questionId}`} size="lg" compact>
+    <Modal open={open} onClose={handleClose} title={questionId === null ? '新增 Part 5 题目' : '编辑题目'} size="lg" compact>
       <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="space-y-5">
         <section className="border-b border-stone-200 pb-5">
           <label className="block text-sm font-medium text-stone-800">粘贴题目
@@ -167,7 +167,7 @@ export default function QuestionEditorModal({
           <div className="mt-2 flex flex-wrap items-center gap-3"><button type="button" onClick={handlePasteParse} className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100">解析到表单</button>{parseWarning ? <p className="text-sm text-stone-600">{parseWarning}</p> : null}</div>
         </section>
 
-        {formError ? <div className="border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800"><p>{formError}</p>{duplicateId !== null ? <button type="button" onClick={() => void save(true)} disabled={saving} className="mt-2 rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-800 hover:bg-red-100 disabled:text-red-400">仍然保存（匹配题目 #{duplicateId}）</button> : null}</div> : null}
+        {formError ? <div className="border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800"><p>{formError}</p>{duplicateId !== null ? <button type="button" onClick={() => void save(true)} disabled={saving} className="mt-2 rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-800 hover:bg-red-100 disabled:text-red-400">仍然保存</button> : null}</div> : null}
 
         <label className="block text-sm font-medium text-stone-800">题干
           <textarea value={draft.stem} onChange={(event) => updateDraft({ stem: event.target.value })} rows={3} required className="mt-2 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900" />

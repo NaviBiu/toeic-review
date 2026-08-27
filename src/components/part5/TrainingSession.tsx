@@ -137,7 +137,9 @@ function QuestionAttempt({
               : selected
                 ? 'border-red-600 bg-red-50 text-red-950'
                 : 'border-stone-200 bg-white text-stone-700'
-            : 'border-stone-300 bg-white text-stone-900 hover:border-stone-500 hover:bg-stone-50';
+            : selected
+              ? 'border-stone-700 bg-stone-100 text-stone-950'
+              : 'border-stone-300 bg-white text-stone-900 hover:border-stone-500 hover:bg-stone-50';
           return (
             <button
               key={option}

@@ -251,27 +251,6 @@ export async function createReviewSession(
   };
 }
 
-async function findSessionQuestion(
-  client: VercelClient,
-  sessionId: number,
-  questionId: number,
-): Promise<{ correctOption: QuestionOption; analysis: string; notes: string | null }> {
-  const { rows } = await client.query(
-    `SELECT item.correct_option_snapshot AS correct_option,
-       item.analysis_snapshot AS analysis, item.notes_snapshot AS notes
-     FROM question_review_session_items item
-     WHERE item.session_id = $1 AND item.question_id = $2`,
-    [sessionId, questionId],
-  );
-  const question = rows[0] as {
-    correct_option: QuestionOption;
-    analysis: string;
-    notes: string | null;
-  } | undefined;
-  if (!question) throw new SessionError('题目不属于本次训练', 'conflict');
-  return { correctOption: question.correct_option, analysis: question.analysis, notes: question.notes };
-}
-
 async function findAttempt(client: VercelClient, attemptId: number): Promise<AttemptRow> {
   const { rows } = await client.query(
     `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
@@ -290,21 +269,34 @@ async function findAttempt(client: VercelClient, attemptId: number): Promise<Att
   return attempt;
 }
 
-async function findAttemptByRequestId(client: VercelClient, requestId: string): Promise<AttemptRow> {
+async function findOrCreateAttempt(client: VercelClient, input: SubmitAttemptInput): Promise<AttemptRow> {
   const { rows } = await client.query(
-    `SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
-       attempt.duration_excluded,
-       attempt.session_id, attempt.question_id, attempt.selected_option,
+    `WITH session_question AS (
+       SELECT item.correct_option_snapshot AS correct_option
+       FROM question_review_session_items item
+       WHERE item.session_id = $2 AND item.question_id = $3
+     ), inserted AS (
+       INSERT INTO question_attempts
+         (request_id, session_id, question_id, selected_option, is_correct, duration_ms,
+          submitted_duration_ms)
+       SELECT $1, $2, $3, $4, $4 = session_question.correct_option, $5, $5
+       FROM session_question
+       ON CONFLICT (request_id) DO UPDATE SET request_id = EXCLUDED.request_id
+       RETURNING id, session_id, question_id, selected_option, is_correct, duration_ms,
+         submitted_duration_ms, duration_excluded
+     )
+     SELECT attempt.id, attempt.is_correct, attempt.duration_ms, attempt.submitted_duration_ms,
+       attempt.duration_excluded, attempt.session_id, attempt.question_id, attempt.selected_option,
        item.correct_option_snapshot AS correct_option,
        item.analysis_snapshot AS analysis, item.notes_snapshot AS notes
-     FROM question_attempts attempt
+     FROM inserted attempt
      JOIN question_review_session_items item
        ON item.session_id = attempt.session_id AND item.question_id = attempt.question_id
-     WHERE attempt.request_id = $1`,
-    [requestId],
+     LIMIT 1`,
+    [input.requestId, input.sessionId, input.questionId, input.selectedOption, input.durationMs],
   );
   const attempt = rows[0] as AttemptRow | undefined;
-  if (!attempt) throw new SessionError('作答记录不存在', 'not_found');
+  if (!attempt) throw new SessionError('题目不属于本次训练', 'conflict');
   return attempt;
 }
 
@@ -368,17 +360,7 @@ export async function submitAttempt(client: VercelClient, input: SubmitAttemptIn
   if (!options.includes(input.selectedOption)) throw new SessionError('答案不正确', 'invalid');
   validateDuration(input.durationMs);
 
-  const question = await findSessionQuestion(client, input.sessionId, input.questionId);
-  await client.query(
-    `INSERT INTO question_attempts
-       (request_id, session_id, question_id, selected_option, is_correct, duration_ms,
-        submitted_duration_ms)
-     VALUES ($1, $2, $3, $4, $5, $6, $6)
-     ON CONFLICT (request_id) DO NOTHING`,
-    [input.requestId, input.sessionId, input.questionId, input.selectedOption,
-      input.selectedOption === question.correctOption, input.durationMs],
-  );
-  const storedAttempt = await findAttemptByRequestId(client, input.requestId);
+  const storedAttempt = await findOrCreateAttempt(client, input);
   if (!matchesAttemptPayload(storedAttempt, input)) {
     throw new SessionError('请求标识已用于其他作答', 'conflict');
   }

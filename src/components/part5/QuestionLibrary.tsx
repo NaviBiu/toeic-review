@@ -84,7 +84,7 @@ function StatusControl({
 }) {
   return (
     <select
-      aria-label={`题目 ${question.id} 的状态`}
+      aria-label={`题目状态：${question.stem}`}
       value={question.status}
       disabled={changing}
       onChange={(event) => onChange(event.target.value as QuestionStatus)}
@@ -110,7 +110,7 @@ function MobileQuestionRow({
     <article className="border-b border-stone-200 px-4 py-4 last:border-b-0">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-xs text-stone-500">#{question.id} · {question.categoryPath.join(' / ')}</p>
+          <p className="text-xs text-stone-500">{question.categoryPath.join(' / ')}</p>
           <p className="mt-1 line-clamp-2 text-sm font-medium text-stone-900">{question.stem}</p>
         </div>
         <button type="button" onClick={() => onEdit(question)} className="shrink-0 text-sm font-medium text-stone-700 hover:text-stone-950">编辑</button>
@@ -203,7 +203,7 @@ export default function QuestionLibrary({
   async function changeStatus(question: QuestionListItem, nextStatus: QuestionStatus) {
     if (nextStatus === question.status || changingId !== null) return;
     const needsConfirmation = nextStatus === 'inactive' || nextStatus === 'deleted';
-    if (needsConfirmation && !window.confirm(`确定将题目 #${question.id} 标记为${statusLabels[nextStatus]}吗？`)) return;
+    if (needsConfirmation && !window.confirm(`确定将这道题标记为${statusLabels[nextStatus]}吗？`)) return;
 
     setChangingId(question.id);
     setActionError('');
@@ -272,7 +272,7 @@ export default function QuestionLibrary({
               {items.map((question) => (
                 <tr key={question.id}>
                   <td className="max-w-40 px-4 py-3 text-xs text-stone-600">{question.categoryPath.join(' / ')}</td>
-                  <td className="max-w-72 px-4 py-3"><p className="truncate font-medium text-stone-900" title={question.stem}>{question.stem}</p><p className="mt-1 font-mono text-xs text-stone-500">#{question.id}</p></td>
+                  <td className="max-w-72 px-4 py-3"><p className="truncate font-medium text-stone-900" title={question.stem}>{question.stem}</p></td>
                   <td className="px-4 py-3"><StatusControl question={question} onChange={(nextStatus) => void changeStatus(question, nextStatus)} changing={changingId === question.id} /></td>
                   <td className="px-4 py-3"><LatestResult value={question.stats.latestCorrect} /></td>
                   <td className="px-4 py-3 font-mono text-xs text-stone-600">{formatAttemptDuration(question.stats.latestDurationMs)}</td>

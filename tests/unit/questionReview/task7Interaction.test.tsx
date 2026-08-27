@@ -218,10 +218,12 @@ describe('Task 7 component interactions', () => {
 
     await render(<TrainingSession session={{ id: 7, actualCount: 1, questions: [question] }} onExit={onExit} />);
 
-    await click(buttonStartingWith('A'));
+    const selectedOption = buttonStartingWith('A');
+    await click(selectedOption);
     const abandon = buttonByText('放弃本次训练');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(abandon.disabled).toBe(true);
+    expect(selectedOption.className).toContain('bg-stone-100');
 
     await click(abandon);
     expect(onExit).not.toHaveBeenCalled();
