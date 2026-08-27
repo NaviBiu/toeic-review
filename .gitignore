@@ -17,6 +17,7 @@
 /.next/
 /out/
 /.worktrees/
+/.superpowers/sdd/
 
 # production
 /build
