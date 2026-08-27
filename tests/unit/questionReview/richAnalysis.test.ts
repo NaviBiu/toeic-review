@@ -33,6 +33,41 @@ describe('rich Part 5 analysis', () => {
         ],
       },
     ]);
+
+  });
+
+  it('drops Word and Tencent document CSS from rich clipboard HTML', () => {
+    const blocks = parseAnalysisClipboardHtml(`
+      <style><!--
+        p.MsoNormal { mso-style-name: 正文; margin: 0pt; mso-pagination: none; }
+        table.MsoTableGrid { border-collapse: collapse; }
+      --></style>
+      <div>&lt;!--p.MsoNormal{ mso-style-name: 正文; mso-style-parent: ""; margin: 0pt; mso-pagination: none; }--&gt;</div>
+      <p class="MsoNormal">分析：预约的人很少。</p>
+      <table class="MsoTableGrid">
+        <tr><td>表达</td><td>脑内翻译</td></tr>
+        <tr><td>therefore</td><td>因此</td></tr>
+      </table>
+    `);
+
+    expect(blocks).toEqual([
+      { type: 'paragraph', text: '分析：预约的人很少。' },
+      {
+        type: 'table',
+        rows: [
+          { header: true, cells: ['表达', '脑内翻译'] },
+          { header: false, cells: ['therefore', '因此'] },
+        ],
+      },
+    ]);
+
+    const previouslySaved = `toeic-rich-analysis:v1:${JSON.stringify([
+      { type: 'paragraph', text: '<!--p.MsoNormal{ mso-style-name: 正文; mso-pagination: none; }-->' },
+      { type: 'paragraph', text: '分析：预约的人很少。' },
+    ])}`;
+    expect(decodeAnalysis(previouslySaved)).toEqual([
+      { type: 'paragraph', text: '分析：预约的人很少。' },
+    ]);
   });
 
   it('round-trips table analysis while keeping legacy plain text readable', () => {

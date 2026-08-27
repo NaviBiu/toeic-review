@@ -16,14 +16,23 @@ export type AnalysisTable = {
 export type AnalysisBlock = AnalysisParagraph | AnalysisTable;
 
 const RICH_ANALYSIS_PREFIX = 'toeic-rich-analysis:v1:';
+const NON_CONTENT_TAGS = new Set(['HEAD', 'LINK', 'META', 'NOSCRIPT', 'SCRIPT', 'STYLE', 'TEMPLATE', 'TITLE', 'XML']);
 
 function cleanText(value: string) {
   return value.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim();
 }
 
+function isDocumentCssArtifact(value: string) {
+  const text = value.trim();
+  const officeDeclarations = text.match(/\bmso-[\w-]+\s*:/gi) ?? [];
+  return officeDeclarations.length >= 2
+    && /(?:<!--\s*)?(?:[a-z][\w-]*\.)?Mso[\w-]*\s*\{/i.test(text);
+}
+
 function normalizeBlocks(blocks: AnalysisBlock[]): AnalysisBlock[] {
   return blocks.flatMap((block): AnalysisBlock[] => {
     if (block.type === 'paragraph') {
+      if (isDocumentCssArtifact(block.text)) return [];
       return [{ type: 'paragraph', text: block.text }];
     }
     const rows = block.rows
@@ -107,6 +116,7 @@ export function parseAnalysisClipboardHtml(html: string): AnalysisBlock[] {
       return;
     }
     if (!(node instanceof HTMLElement)) return;
+    if (NON_CONTENT_TAGS.has(node.tagName)) return;
     if (node.querySelector('table')) {
       node.childNodes.forEach(visit);
       return;
