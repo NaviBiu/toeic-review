@@ -12,4 +12,8 @@ describe('normalizeTerm', () => {
   it("strips apostrophes", () => {
     expect(normalizeTerm("don't")).toBe('dont');
   });
+  it('ignores trailing punctuation copied from note formatting', () => {
+    expect(normalizeTerm('place an order，')).toBe(normalizeTerm('place an order'));
+    expect(normalizeTerm('as a result,')).toBe(normalizeTerm('as a result'));
+  });
 });

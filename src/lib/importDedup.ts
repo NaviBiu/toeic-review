@@ -15,6 +15,7 @@ export type CandidateRecord = {
 
 export type DedupDecision =
   | { action: 'skip_duplicate' }
+  | { action: 'enrich_existing' }
   | { action: 'insert_new' }
   | { action: 'wrong_again'; reviveFromMastered: boolean; textConflict: boolean };
 
@@ -23,6 +24,9 @@ export function decideDedup(candidate: CandidateRecord, existing: ExistingMatch)
     return { action: 'insert_new' };
   }
   if (existing.dateAdded === candidate.dateAdded) {
+    if (!existing.notes?.trim() && candidate.notes?.trim()) {
+      return { action: 'enrich_existing' };
+    }
     return { action: 'skip_duplicate' };
   }
   const textConflict =

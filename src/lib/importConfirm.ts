@@ -24,6 +24,13 @@ export async function applyConfirmedImportItem(
   if (item.decision.action === 'skip_duplicate') {
     return { action: 'skipped', id: item.existingId };
   }
+  if (item.decision.action === 'enrich_existing') {
+    if (!item.existingId || !item.notes?.trim()) {
+      throw new Error('缺少要补全的现有记录或考点分析');
+    }
+    await updateKnowledgePointFields(client, item.existingId, { notes: item.notes });
+    return { action: 'enriched', id: item.existingId };
+  }
   if (item.decision.action === 'insert_new') {
     const kp = await insertKnowledgePoint(client, {
       term: item.term, meaning: item.meaning, example: item.example, notes: item.notes,

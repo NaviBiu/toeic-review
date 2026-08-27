@@ -169,6 +169,9 @@ export default function ImportPage() {
                   {c.decision.action === 'skip_duplicate' && (
                     <p className="text-sm text-stone-400">与现有记录完全相同,已跳过</p>
                   )}
+                  {c.decision.action === 'enrich_existing' && (
+                    <p className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-700">现有记录缺少备注,本次将补全考点分析</p>
+                  )}
                   {c.scenarioWasSanitized && (
                     <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-700">AI 分类未命中,已自动归为未分类,请手动校正</p>
                   )}
@@ -264,13 +267,14 @@ export default function ImportPage() {
           }, {});
           const submittedCount = results.length;
           const insertedCount = counts.inserted ?? 0;
+          const enrichedCount = counts.enriched ?? 0;
           const failedCount = counts.error ?? 0;
 
           return (
             <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <p className="text-base font-semibold text-stone-900">导入完成</p>
               <p className="mt-2 text-sm text-stone-600">
-                本次确认导入 {submittedCount} 条，新增成功 {insertedCount} 条。
+                本次确认导入 {submittedCount} 条，新增成功 {insertedCount} 条，补全考点分析 {enrichedCount} 条。
               </p>
               {failedCount > 0 && (
                 <p className="mt-1 text-sm text-red-600">

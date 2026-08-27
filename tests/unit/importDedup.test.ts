@@ -18,6 +18,13 @@ describe('decideDedup', () => {
     expect(decideDedup(candidate, existing)).toEqual({ action: 'skip_duplicate' });
   });
 
+  it('enriches missing notes when the same dated item is re-imported with source analysis', () => {
+    const enriched = { ...candidate, notes: '考点分析：高频表达。' };
+    const existing = { status: 'active' as const, dateAdded: '2026-06-26', meaning: 'm', example: 'e', notes: null };
+
+    expect(decideDedup(enriched, existing)).toEqual({ action: 'enrich_existing' });
+  });
+
   it('treats a different date_added on an active record as wrong-again, even with identical text', () => {
     const existing = { status: 'active' as const, dateAdded: '2026-06-20', meaning: 'm', example: 'e', notes: null };
     expect(decideDedup(candidate, existing)).toEqual({ action: 'wrong_again', reviveFromMastered: false, textConflict: false });

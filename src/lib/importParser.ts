@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import { z } from 'zod';
 import { sanitizeScenario } from './scenarios';
+import { normalizeTerm } from './termNormalize';
 
 export class TruncatedAiResponseError extends Error {}
 
@@ -98,7 +99,7 @@ const PART_RE = /Part\s*[1-4]/gi;
 // Captures the leading boundary (start-of-string or one whitespace char) so
 // "...次 3. hang" and "3. hang" at a real line start are both matched the
 // same way; the boundary char itself is excluded from the marker's range.
-const ENTRY_RE = /(^|\s)(\d{1,3}\.\s)/g;
+const ENTRY_RE = /(^|\s)(\d{1,3}(?:\.\s+|[，,、．]\s*(?=短\s*语\s*[：:])))/g;
 
 type Marker = { type: 'date' | 'part' | 'entry'; start: number; text: string };
 
@@ -126,7 +127,7 @@ function findMarkers(text: string): Marker[] {
   PART_RE.lastIndex = 0;
   while ((m = PART_RE.exec(text))) {
     const next = entryMarkers.find((e) => e.start > m!.index);
-    if (next && next.text.startsWith('1.')) {
+    if (next && /^1(?:\.|[，,、．])/.test(next.text)) {
       partMarkers.push({ type: 'part', start: m.index, text: m[0] });
     }
   }
@@ -194,12 +195,36 @@ function normalizePart(rawPart: unknown): number {
   throw new Error('AI 解析失败,请重试');
 }
 
+function extractLabeledSourceNotes(text: string): Map<string, string> {
+  const markers = findMarkers(text);
+  const notesByTerm = new Map<string, string>();
+
+  for (let i = 0; i < markers.length; i++) {
+    const marker = markers[i];
+    if (marker.type !== 'entry') continue;
+    const end = markers[i + 1]?.start ?? text.length;
+    const entry = text.slice(marker.start, end).trim();
+    const termMatch = entry.match(/短\s*语\s*[：:]\s*([\s\S]*?)\s*短\s*语\s*翻\s*译\s*[：:]/);
+    const analysisMatch = /考\s*点\s*分\s*析\s*[：:]\s*/.exec(entry);
+    if (!termMatch || !analysisMatch) continue;
+
+    const term = termMatch[1].replace(/\s+/g, ' ').trim();
+    const analysis = entry.slice(analysisMatch.index + analysisMatch[0].length).trim();
+    if (term && analysis) {
+      notesByTerm.set(normalizeTerm(term), `考点分析：${analysis}`);
+    }
+  }
+
+  return notesByTerm;
+}
+
 async function parseChunk(
   client: Pick<OpenAI, 'chat'>,
   chunkText: string,
   fallbackDate: string,
   scenarioTaxonomy: Record<string, string[]>
 ): Promise<ParsedCandidate[]> {
+  const sourceNotes = extractLabeledSourceNotes(chunkText);
   const request = {
     model: process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL,
     max_tokens: 8192,
@@ -251,7 +276,7 @@ async function parseChunk(
       term: item.term,
       meaning: item.meaning,
       example: item.example,
-      notes: item.notes ?? null,
+      notes: sourceNotes.get(normalizeTerm(item.term)) ?? item.notes ?? null,
       part: normalizePart(item.part),
       dateAdded: item.dateAdded,
       scenarioMajor: sanitized.major,

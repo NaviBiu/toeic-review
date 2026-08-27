@@ -179,6 +179,32 @@ describe('parseImportDocument', () => {
     expect(result[0].part).toBe(4);
   });
 
+  it('preserves a labeled source analysis when the AI returns notes as null', async () => {
+    const client = fakeClient([{
+      term: 'site office', meaning: '现场办公室', example: 'ex', notes: null, part: 3,
+      dateAdded: '2026-08-16', scenarioMajor: '未分类', scenarioMinor: '未分类',
+      meaningWasAiGenerated: false, exampleWasAiGenerated: false,
+    }]);
+    const source = '时间：2026.8.16 Part3 1. 短语：site office 短语翻译：现场办公室 例句：ex 例句翻译：例句 考 点 分 析 ：建筑场景高频地点表达。';
+
+    const result = await parseImportDocument(client, source, '2026-08-20', SCENARIOS);
+
+    expect(result[0].notes).toBe('考点分析：建筑场景高频地点表达。');
+  });
+
+  it('matches source analysis when the source term has trailing punctuation that AI removes', async () => {
+    const client = fakeClient([{
+      term: 'place an order', meaning: '下单', example: 'ex', notes: null, part: 3,
+      dateAdded: '2026-08-16', scenarioMajor: '未分类', scenarioMinor: '未分类',
+      meaningWasAiGenerated: false, exampleWasAiGenerated: false,
+    }]);
+    const source = '时间：2026.8.16 Part3 1. 短语：place an order， 短语翻译：下单 考点分析：采购场景高频表达。';
+
+    const result = await parseImportDocument(client, source, '2026-08-20', SCENARIOS);
+
+    expect(result[0].notes).toBe('考点分析：采购场景高频表达。');
+  });
+
   it('uses DeepSeek JSON mode with bounded output and thinking disabled', async () => {
     let params: any;
     const client = {
@@ -295,6 +321,16 @@ describe('splitIntoBatches', () => {
 
   it('returns no chunks for text with no numbered entries', () => {
     expect(splitIntoBatches('just some prose with no list')).toEqual([]);
+  });
+
+  it('recognizes Chinese-comma numbered entries from flattened PDFs', () => {
+    const text = '时间：2026.8.12 Part3 1，短语：cut it close 短语翻译：时间紧迫 考点分析：高频口语表达。 2，短语：facilities team 短语翻译：后勤团队 考点分析：办公场景核心词汇。';
+
+    const chunks = splitIntoBatches(text, 20);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toContain('1，短语：cut it close');
+    expect(chunks[0]).toContain('2，短语：facilities team');
   });
 });
 

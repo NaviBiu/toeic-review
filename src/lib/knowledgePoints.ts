@@ -50,15 +50,20 @@ export async function findMatch(
   part: number,
   scenarioMajor: string,
   scenarioMinor: string,
-  skill: string
+  skill: string,
+  dateAdded?: string,
 ): Promise<KnowledgePoint | null> {
   const target = normalizeTerm(term);
   const { rows } = await client.query(
     `SELECT * FROM knowledge_points
-     WHERE part = $1 AND scenario_major = $2 AND scenario_minor = $3 AND skill = $4 AND status != 'deleted'`,
-    [part, scenarioMajor, scenarioMinor, skill]
+     WHERE part = $1 AND skill = $2 AND status != 'deleted'`,
+    [part, skill]
   );
-  const match = rows.find((row: any) => normalizeTerm(row.term) === target);
+  const termMatches = rows.filter((row: any) => normalizeTerm(row.term) === target);
+  const match = (
+    (dateAdded ? termMatches.find((row: any) => row.date_added === dateAdded) : null)
+    ?? termMatches.find((row: any) => row.scenario_major === scenarioMajor && row.scenario_minor === scenarioMinor)
+  );
   return match ? mapRow(match) : null;
 }
 

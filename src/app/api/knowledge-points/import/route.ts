@@ -86,7 +86,15 @@ export async function POST(req: NextRequest) {
     const withDecisions = [];
     for (const candidate of candidates) {
       const safeDate = isFutureDate(candidate.dateAdded, today) ? today : candidate.dateAdded;
-      const existing = await findMatch(client, candidate.term, candidate.part, candidate.scenarioMajor, candidate.scenarioMinor, 'listening');
+      const existing = await findMatch(
+        client,
+        candidate.term,
+        candidate.part,
+        candidate.scenarioMajor,
+        candidate.scenarioMinor,
+        'listening',
+        safeDate,
+      );
       const decision = decideDedup(
         { dateAdded: safeDate, meaning: candidate.meaning, example: candidate.example, notes: candidate.notes },
         existing ? { status: existing.status, dateAdded: existing.dateAdded, meaning: existing.meaning, example: existing.example, notes: existing.notes } : null
