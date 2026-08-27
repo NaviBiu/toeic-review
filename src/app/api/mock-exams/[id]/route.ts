@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/db';
-import { replacePracticeAttachments } from '@/lib/mockExams';
+import { replacePracticeAttachments, resolvePracticeAttachmentInputs } from '@/lib/mockExams';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: idParam } = await params;
@@ -14,7 +14,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   await client.connect();
   try {
     await client.query('BEGIN');
-    const attachments = await replacePracticeAttachments(client, id, body.attachments);
+    const inputs = await resolvePracticeAttachmentInputs(client, id, body.attachments);
+    const attachments = await replacePracticeAttachments(client, id, inputs);
     await client.query('COMMIT');
     return NextResponse.json({ attachments });
   } catch (err: any) {

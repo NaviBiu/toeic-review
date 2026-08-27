@@ -209,6 +209,7 @@ function PracticeRecordListItem({
 
 export default function MockExamsPage() {
   const [history, setHistory] = useState<PracticeRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<PracticeSection>('listening');
   const [showAddModal, setShowAddModal] = useState(false);
   const [practiceDate, setPracticeDate] = useState('');
@@ -246,25 +247,35 @@ export default function MockExamsPage() {
   const diagnosticsByPart = new Map(diagnostics.map((diagnostic) => [diagnostic.part, diagnostic]));
 
   async function fetchHistory(signal?: AbortSignal): Promise<PracticeRecord[]> {
-    const res = await fetch('/api/mock-exams', { signal });
+    const res = await fetch('/api/mock-exams', { signal, cache: 'no-store' });
     if (!res.ok) throw new Error();
     return res.json();
   }
 
   async function load() {
+    setHistoryLoading(true);
+    setHistoryError('');
     try {
       setHistory(await fetchHistory());
     } catch {
       setHistoryError('练习记录加载失败,请刷新重试');
+    } finally {
+      setHistoryLoading(false);
     }
   }
   useEffect(() => {
     const controller = new AbortController();
     fetchHistory(controller.signal)
-      .then(setHistory)
+      .then((records) => {
+        setHistory(records);
+        setHistoryError('');
+      })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setHistoryError('练习记录加载失败,请刷新重试');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistoryLoading(false);
       });
     return () => controller.abort();
   }, []);
@@ -694,7 +705,11 @@ export default function MockExamsPage() {
 
         {historyError && <p className="mb-3 text-sm text-red-600">{historyError}</p>}
 
-        {activeSection === 'listening' && tab === 'analysis' ? (
+        {historyLoading ? (
+          <div className="rounded-lg border border-stone-200 bg-white p-10 text-center text-stone-500 shadow-sm" role="status">
+            正在加载练习记录…
+          </div>
+        ) : activeSection === 'listening' && tab === 'analysis' ? (
           listeningHistory.length === 0 && !historyError ? (
             <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
               还没有练习记录

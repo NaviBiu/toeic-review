@@ -30,8 +30,12 @@ type PracticeAttachmentRow = {
   practice_session_id: number;
   name: string;
   mime_type: string;
-  data_url: string;
+  data_url?: string;
 };
+
+function practiceAttachmentUrl(id: number): string {
+  return `/api/mock-exams/attachments/${id}`;
+}
 
 type LegacyMockExamInput = {
   testDate: string;
@@ -247,6 +251,38 @@ export async function replacePracticeAttachments(
   return saved;
 }
 
+export async function resolvePracticeAttachmentInputs(
+  client: VercelClient,
+  practiceSessionId: number,
+  attachments: PracticeAttachmentInput[],
+): Promise<PracticeAttachmentInput[]> {
+  const referencedIds = attachments.flatMap((attachment) => {
+    const match = attachment.dataUrl.match(/^\/api\/mock-exams\/attachments\/(\d+)$/);
+    return match ? [Number(match[1])] : [];
+  });
+  if (referencedIds.length === 0) {
+    validateAttachments(attachments);
+    return attachments;
+  }
+
+  const { rows } = await client.query<PracticeAttachmentRow>(
+    `SELECT id, practice_session_id, name, mime_type, data_url
+     FROM practice_session_attachments
+     WHERE practice_session_id = $1 AND id = ANY($2::int[])`,
+    [practiceSessionId, referencedIds],
+  );
+  const storedById = new Map(rows.map((row) => [row.id, row]));
+  const resolved = attachments.map((attachment) => {
+    const match = attachment.dataUrl.match(/^\/api\/mock-exams\/attachments\/(\d+)$/);
+    if (!match) return attachment;
+    const stored = storedById.get(Number(match[1]));
+    if (!stored?.data_url) throw new Error('错题图片不存在或不属于这条练习记录');
+    return { name: stored.name, mimeType: stored.mime_type, dataUrl: stored.data_url };
+  });
+  validateAttachments(resolved);
+  return resolved;
+}
+
 export async function listMockExams(client: VercelClient): Promise<PracticeSessionResult[]> {
   const { rows } = await client.query<PracticeSessionRow>(
     'SELECT * FROM practice_sessions ORDER BY practice_date DESC, id DESC',
@@ -269,7 +305,7 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
     [sessionIds],
   );
   const { rows: attachmentRows } = await client.query<PracticeAttachmentRow>(
-    `SELECT id, practice_session_id, name, mime_type, data_url
+    `SELECT id, practice_session_id, name, mime_type
      FROM practice_session_attachments
      WHERE practice_session_id = ANY($1::int[])
      ORDER BY practice_session_id, id`,
@@ -302,7 +338,7 @@ export async function listMockExams(client: VercelClient): Promise<PracticeSessi
       id: attachment.id,
       name: attachment.name,
       mimeType: attachment.mime_type,
-      dataUrl: attachment.data_url,
+      dataUrl: practiceAttachmentUrl(attachment.id),
     });
     attachmentsBySession.set(attachment.practice_session_id, attachments);
   }
