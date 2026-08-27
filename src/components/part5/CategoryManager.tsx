@@ -43,7 +43,8 @@ export default function CategoryManager({
   const [inactiveCategories, setInactiveCategories] = useState<CategoryNode[] | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(categories[0]?.id ?? null);
-  const [newName, setNewName] = useState('');
+  const [newParentName, setNewParentName] = useState('');
+  const [newChildName, setNewChildName] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
   const [movingId, setMovingId] = useState<number | null>(null);
@@ -89,8 +90,8 @@ export default function CategoryManager({
     onChanged();
   }
 
-  async function createCategory(parentId: number | null) {
-    const name = newName.trim();
+  async function createCategory(parentId: number | null, rawName: string) {
+    const name = rawName.trim();
     if (!name) {
       setError('请输入分类名称');
       return;
@@ -98,12 +99,17 @@ export default function CategoryManager({
     setBusyAction('create');
     setError('');
     try {
-      await requestCategory('/api/question-categories', {
+      const created = await requestCategory('/api/question-categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ section: 'reading', part: 5, parentId, name }),
       });
-      setNewName('');
+      if (parentId === null) {
+        setNewParentName('');
+        if (Number.isInteger(created.id)) setSelectedParentId(created.id);
+      } else {
+        setNewChildName('');
+      }
       await afterMutation();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '分类保存失败，请重试');
@@ -251,11 +257,50 @@ export default function CategoryManager({
         </label>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 border-b border-stone-200 pb-4">
-        <label className="sr-only" htmlFor="new-category-name">新分类名称</label>
-        <input id="new-category-name" value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void createCategory(selectedParent ? selectedParent.id : null); }} placeholder="新分类名称" className="min-w-52 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900" />
-        <button type="button" onClick={() => void createCategory(null)} disabled={busyAction !== null} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-100 disabled:text-stone-400">新建一级</button>
-        <button type="button" onClick={() => selectedParent && void createCategory(selectedParent.id)} disabled={!selectedParent || selectedParent.status !== 'active' || busyAction !== null} className="rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:bg-stone-300">添加至当前分类</button>
+      <div className="mt-4 grid gap-px overflow-hidden border border-stone-200 bg-stone-200 md:grid-cols-2">
+        <div className="bg-white p-4">
+          <label htmlFor="new-parent-category" className="text-sm font-semibold text-stone-900">新增一级分类</label>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              id="new-parent-category"
+              aria-label="一级分类名称"
+              value={newParentName}
+              onChange={(event) => setNewParentName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void createCategory(null, newParentName); }}
+              placeholder="一级分类名称"
+              className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+            />
+            <button type="button" onClick={() => void createCategory(null, newParentName)} disabled={busyAction !== null} className="rounded-md border border-stone-800 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-100 disabled:border-stone-300 disabled:text-stone-400">新增一级分类</button>
+          </div>
+        </div>
+
+        <div className="bg-white p-4">
+          <p className="text-sm font-semibold text-stone-900">新增二级分类</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(8rem,0.8fr)_minmax(9rem,1fr)_auto]">
+            <label className="sr-only" htmlFor="new-child-parent">所属一级分类</label>
+            <select
+              id="new-child-parent"
+              aria-label="二级分类所属一级分类"
+              value={selectedParent?.id ?? ''}
+              onChange={(event) => setSelectedParentId(Number(event.target.value))}
+              disabled={parents.every((parent) => parent.status !== 'active')}
+              className="min-w-0 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 disabled:bg-stone-100 disabled:text-stone-400"
+            >
+              {parents.filter((parent) => parent.status === 'active').map((parent) => <option key={parent.id} value={parent.id}>{parent.name}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="new-child-category">二级分类名称</label>
+            <input
+              id="new-child-category"
+              aria-label="二级分类名称"
+              value={newChildName}
+              onChange={(event) => setNewChildName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter' && selectedParent) void createCategory(selectedParent.id, newChildName); }}
+              placeholder="二级分类名称"
+              className="min-w-0 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+            />
+            <button type="button" onClick={() => selectedParent && void createCategory(selectedParent.id, newChildName)} disabled={!selectedParent || selectedParent.status !== 'active' || busyAction !== null} className="rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:bg-stone-300">新增二级分类</button>
+          </div>
+        </div>
       </div>
 
       {error ? <p role="alert" className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
@@ -289,7 +334,10 @@ export default function CategoryManager({
           </div>
           <ul>{children.map(renderCategoryRow)}</ul>
           {selectedParent && children.length === 0 ? <p className="px-3 py-6 text-sm text-stone-500">暂无二级分类</p> : null}
-          {selectedParent ? <div className="border-t border-stone-200">{renderCategoryRow(selectedParent)}</div> : null}
+          {selectedParent ? <div className="border-t border-stone-200">
+            <p className="border-b border-stone-200 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-500">当前一级分类设置</p>
+            <ul>{renderCategoryRow(selectedParent)}</ul>
+          </div> : null}
         </div>
       </div>
 
@@ -297,13 +345,13 @@ export default function CategoryManager({
         <h3 className="text-sm font-semibold text-stone-900">合并分类</h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <label className="text-sm text-stone-700">来源分类
-            <select value={mergeSourceId ?? ''} onChange={(event) => { setMergeSourceId(event.target.value ? Number(event.target.value) : null); setMergeConfirmation(''); }} className="mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
+            <select aria-label="合并来源分类" value={mergeSourceId ?? ''} onChange={(event) => { setMergeSourceId(event.target.value ? Number(event.target.value) : null); setMergeConfirmation(''); }} className="mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
               <option value="">请选择</option>
               {allCategories.filter((category) => !category.isDefault).map((category) => <option key={category.id} value={category.id}>{categoryPath(category, parents)}</option>)}
             </select>
           </label>
           <label className="text-sm text-stone-700">目标分类
-            <select value={mergeTargetId ?? ''} onChange={(event) => { setMergeTargetId(event.target.value ? Number(event.target.value) : null); setMergeConfirmation(''); }} className="mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
+            <select aria-label="合并目标分类" value={mergeTargetId ?? ''} onChange={(event) => { setMergeTargetId(event.target.value ? Number(event.target.value) : null); setMergeConfirmation(''); }} className="mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800">
               <option value="">请选择</option>
               {allCategories.filter((category) => category.status === 'active' && category.id !== mergeSourceId).map((category) => <option key={category.id} value={category.id}>{categoryPath(category, parents)}</option>)}
             </select>

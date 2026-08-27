@@ -157,6 +157,52 @@ afterEach(async () => {
 });
 
 describe('Task 7 component interactions', () => {
+  it('creates a first-level category from its dedicated form', async () => {
+    const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+      return Promise.resolve(init?.method === 'POST'
+        ? jsonResponse({ id: 3, name: '固定搭配', parentId: null })
+        : jsonResponse(categories));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await render(<CategoryManager categories={categories} onChanged={vi.fn()} />);
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="一级分类名称"]');
+    if (!input) throw new Error('First-level category input not found');
+
+    await setValue(input, '固定搭配');
+    await click(buttonByText('新增一级分类'));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/question-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'reading', part: 5, parentId: null, name: '固定搭配' }),
+    });
+  });
+
+  it('creates a second-level category under the explicitly selected parent', async () => {
+    const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
+      return Promise.resolve(init?.method === 'POST'
+        ? jsonResponse({ id: 22, name: '词义辨析', parentId: 2 })
+        : jsonResponse(categories));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await render(<CategoryManager categories={categories} onChanged={vi.fn()} />);
+    const parentSelect = host.querySelector<HTMLSelectElement>('select[aria-label="二级分类所属一级分类"]');
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="二级分类名称"]');
+    if (!parentSelect || !input) throw new Error('Second-level category form not found');
+
+    await setValue(parentSelect, '2');
+    await setValue(input, '词义辨析');
+    await click(buttonByText('新增二级分类'));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/question-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'reading', part: 5, parentId: 2, name: '词义辨析' }),
+    });
+  });
+
   it('renders cumulative question stats after the answer POST resolves and only then permits exit', async () => {
     const pendingPost = deferred<Response>();
     const fetchMock = vi.fn(() => pendingPost.promise);
@@ -213,9 +259,11 @@ describe('Task 7 component interactions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await render(<CategoryManager categories={categories} onChanged={vi.fn()} />);
-    const selects = [...host.querySelectorAll('select')];
-    await setValue(selects[0], '11');
-    await setValue(selects[1], '21');
+    const sourceSelect = host.querySelector<HTMLSelectElement>('select[aria-label="合并来源分类"]');
+    const targetSelect = host.querySelector<HTMLSelectElement>('select[aria-label="合并目标分类"]');
+    if (!sourceSelect || !targetSelect) throw new Error('Merge category selects not found');
+    await setValue(sourceSelect, '11');
+    await setValue(targetSelect, '21');
 
     const textInputs = [...host.querySelectorAll('input')].filter((item) => item.type === 'text');
     await setValue(textInputs[textInputs.length - 1], '语法 / 来源分类 -> 词汇 / 目标分类');
