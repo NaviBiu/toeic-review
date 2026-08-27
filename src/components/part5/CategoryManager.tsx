@@ -38,7 +38,7 @@ export default function CategoryManager({
   onChanged,
 }: {
   categories: CategoryNode[];
-  onChanged: () => void;
+  onChanged: (categories?: CategoryNode[]) => void;
 }) {
   const [inactiveCategories, setInactiveCategories] = useState<CategoryNode[] | null>(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -86,8 +86,8 @@ export default function CategoryManager({
   }
 
   async function afterMutation() {
-    await reload();
     onChanged();
+    if (showInactive) await reload(true);
   }
 
   async function createCategory(parentId: number | null, rawName: string) {
@@ -99,18 +99,25 @@ export default function CategoryManager({
     setBusyAction('create');
     setError('');
     try {
-      const created = await requestCategory('/api/question-categories', {
+      const result = await requestCategory('/api/question-categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section: 'reading', part: 5, parentId, name }),
+        body: JSON.stringify({ section: 'reading', part: 5, parentId, name, includeInactive: showInactive }),
       });
       if (parentId === null) {
         setNewParentName('');
-        if (Number.isInteger(created.id)) setSelectedParentId(created.id);
+        if (Number.isInteger(result.category?.id)) setSelectedParentId(result.category.id);
       } else {
         setNewChildName('');
       }
-      await afterMutation();
+      if (Array.isArray(result.categories)) {
+        if (showInactive && Array.isArray(result.managedCategories)) {
+          setInactiveCategories(result.managedCategories);
+        }
+        onChanged(result.categories);
+      } else {
+        await afterMutation();
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '分类保存失败，请重试');
     } finally {
@@ -270,7 +277,7 @@ export default function CategoryManager({
               placeholder="一级分类名称"
               className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
             />
-            <button type="button" onClick={() => void createCategory(null, newParentName)} disabled={busyAction !== null} className="rounded-md border border-stone-800 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-100 disabled:border-stone-300 disabled:text-stone-400">新增一级分类</button>
+            <button type="button" onClick={() => void createCategory(null, newParentName)} disabled={busyAction !== null} className="rounded-md border border-stone-800 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-100 disabled:border-stone-300 disabled:text-stone-400">{busyAction === 'create' ? '新增中…' : '新增一级分类'}</button>
           </div>
         </div>
 
@@ -298,7 +305,7 @@ export default function CategoryManager({
               placeholder="二级分类名称"
               className="min-w-0 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
             />
-            <button type="button" onClick={() => selectedParent && void createCategory(selectedParent.id, newChildName)} disabled={!selectedParent || selectedParent.status !== 'active' || busyAction !== null} className="rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:bg-stone-300">新增二级分类</button>
+            <button type="button" onClick={() => selectedParent && void createCategory(selectedParent.id, newChildName)} disabled={!selectedParent || selectedParent.status !== 'active' || busyAction !== null} className="rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:bg-stone-300">{busyAction === 'create' ? '新增中…' : '新增二级分类'}</button>
           </div>
         </div>
       </div>

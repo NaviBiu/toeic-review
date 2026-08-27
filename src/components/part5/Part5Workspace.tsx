@@ -161,9 +161,13 @@ export default function Part5Workspace() {
     setEditorCategoryRequestVersion((version) => version + 1);
   }
 
-  function handleQuestionChanged() {
+  function handleQuestionChanged(nextCategories?: CategoryNode[]) {
     setQuestionRefreshVersion((version) => version + 1);
-    refreshCategories();
+    if (nextCategories) {
+      setCategoriesState({ categories: nextCategories, initialLoading: false, error: '' });
+    } else {
+      refreshCategories();
+    }
   }
 
   function exitTraining() {

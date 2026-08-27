@@ -5,6 +5,7 @@ import type {
   QuestionStatus,
   ReviewQuestion,
 } from './types';
+import { analysisHasContent } from './richAnalysis';
 
 const questionOptions: QuestionOption[] = ['A', 'B', 'C', 'D'];
 const questionStatuses: QuestionStatus[] = ['learning', 'mastered', 'inactive', 'deleted'];
@@ -114,7 +115,7 @@ function validateInput(input: ReviewQuestionInput): Required<Omit<ReviewQuestion
   const stem = input.stem.trim();
   if (!stem) throw new QuestionError('题干不能为空', 'invalid');
   const analysis = input.analysis.trim();
-  if (!analysis) throw new QuestionError('考点分析不能为空', 'invalid');
+  if (!analysisHasContent(analysis)) throw new QuestionError('考点分析不能为空', 'invalid');
 
   const options = {} as Record<QuestionOption, string>;
   for (const option of questionOptions) {

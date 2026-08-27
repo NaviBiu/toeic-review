@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { elapsedMs, normalizeEditedDuration } from '@/lib/questionReview/timing';
 import type { AttemptResult, QuestionOption, SessionQuestion } from '@/lib/questionReview/types';
+import { RichAnalysisContent } from './RichAnalysis';
 
 type Session = { id: number; actualCount: number; questions: SessionQuestion[] };
 type PendingAttempt = {
@@ -181,7 +182,7 @@ function QuestionAttempt({
         {timingError ? <p role="alert" className="mt-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">{timingError}</p> : null}
         <div className="mt-5 border-t border-stone-200 pt-4">
           <h3 className="text-sm font-semibold text-stone-900">解析</h3>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-700">{attemptResult.analysis}</p>
+          <RichAnalysisContent value={attemptResult.analysis} />
           <h3 className="mt-5 text-sm font-semibold text-stone-900">笔记</h3>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-700">{attemptResult.notes || '暂无笔记'}</p>
         </div>

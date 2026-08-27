@@ -158,14 +158,15 @@ afterEach(async () => {
 
 describe('Task 7 component interactions', () => {
   it('creates a first-level category from its dedicated form', async () => {
+    const onChanged = vi.fn();
     const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
       return Promise.resolve(init?.method === 'POST'
-        ? jsonResponse({ id: 3, name: '固定搭配', parentId: null })
+        ? jsonResponse({ category: { id: 3, name: '固定搭配', parentId: null }, categories })
         : jsonResponse(categories));
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await render(<CategoryManager categories={categories} onChanged={vi.fn()} />);
+    await render(<CategoryManager categories={categories} onChanged={onChanged} />);
     const input = host.querySelector<HTMLInputElement>('input[aria-label="一级分类名称"]');
     if (!input) throw new Error('First-level category input not found');
 
@@ -175,19 +176,22 @@ describe('Task 7 component interactions', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/question-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section: 'reading', part: 5, parentId: null, name: '固定搭配' }),
+      body: JSON.stringify({ section: 'reading', part: 5, parentId: null, name: '固定搭配', includeInactive: false }),
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith(categories);
   });
 
   it('creates a second-level category under the explicitly selected parent', async () => {
+    const onChanged = vi.fn();
     const fetchMock = vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
       return Promise.resolve(init?.method === 'POST'
-        ? jsonResponse({ id: 22, name: '词义辨析', parentId: 2 })
+        ? jsonResponse({ category: { id: 22, name: '词义辨析', parentId: 2 }, categories })
         : jsonResponse(categories));
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await render(<CategoryManager categories={categories} onChanged={vi.fn()} />);
+    await render(<CategoryManager categories={categories} onChanged={onChanged} />);
     const parentSelect = host.querySelector<HTMLSelectElement>('select[aria-label="二级分类所属一级分类"]');
     const input = host.querySelector<HTMLInputElement>('input[aria-label="二级分类名称"]');
     if (!parentSelect || !input) throw new Error('Second-level category form not found');
@@ -199,8 +203,10 @@ describe('Task 7 component interactions', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/question-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section: 'reading', part: 5, parentId: 2, name: '词义辨析' }),
+      body: JSON.stringify({ section: 'reading', part: 5, parentId: 2, name: '词义辨析', includeInactive: false }),
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith(categories);
   });
 
   it('renders cumulative question stats after the answer POST resolves and only then permits exit', async () => {

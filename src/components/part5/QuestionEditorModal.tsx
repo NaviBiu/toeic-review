@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Modal from '@/components/Modal';
 import { parsePastedQuestion } from '@/lib/questionReview/parser';
 import type { CategoryNode, QuestionListItem, QuestionOption, QuestionStatus, ReviewQuestion } from '@/lib/questionReview/types';
+import { RichAnalysisEditor } from './RichAnalysis';
 
 const options: QuestionOption[] = ['A', 'B', 'C', 'D'];
 const statuses: QuestionStatus[] = ['learning', 'mastered', 'inactive', 'deleted'];
@@ -212,9 +213,10 @@ export default function QuestionEditorModal({
           </label>
         </div>
 
-        <label className="block text-sm font-medium text-stone-800">考点分析
-          <textarea value={draft.analysis} onChange={(event) => updateDraft({ analysis: event.target.value })} rows={4} required className="mt-2 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900" />
-        </label>
+        <div>
+          <p className="text-sm font-medium text-stone-800">考点分析</p>
+          <RichAnalysisEditor value={draft.analysis} onChange={(analysis) => updateDraft({ analysis })} />
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-medium text-stone-800">备注

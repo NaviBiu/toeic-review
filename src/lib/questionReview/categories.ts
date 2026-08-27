@@ -101,24 +101,27 @@ export async function createCategory(
     return mapCategory(rows[0]);
   }
 
+  const { rows } = await client.query(
+    `INSERT INTO question_categories (section, part, parent_id, name, sort_order)
+     SELECT $1, $2, parent.id, $3, $4
+     FROM question_categories parent
+     WHERE parent.id = $5
+       AND parent.parent_id IS NULL
+       AND parent.section = $1
+       AND parent.part = $2
+       AND parent.status = 'active'
+     RETURNING *`,
+    [input.section, input.part, name, sortOrder, input.parentId],
+  );
+  if (rows[0]) return mapCategory(rows[0]);
+
   const parent = await findCategory(client, input.parentId);
-  if (parent.parentId !== null) {
-    throw new CategoryError('分类最多两级', 'conflict');
-  }
+  if (parent.parentId !== null) throw new CategoryError('分类最多两级', 'conflict');
   if (parent.section !== input.section || parent.part !== input.part) {
     throw new CategoryError('分类范围不一致', 'conflict');
   }
-  if (parent.status !== 'active') {
-    throw new CategoryError('父分类已停用', 'conflict');
-  }
-
-  const { rows } = await client.query(
-    `INSERT INTO question_categories (section, part, parent_id, name, sort_order)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
-    [input.section, input.part, parent.id, name, sortOrder],
-  );
-  return mapCategory(rows[0]);
+  if (parent.status !== 'active') throw new CategoryError('父分类已停用', 'conflict');
+  throw new CategoryError('父分类状态已变化，请重试', 'conflict');
 }
 
 export async function updateCategory(

@@ -5,6 +5,7 @@ import {
   createCategory,
   listCategoryTree,
 } from '@/lib/questionReview/categories';
+import type { CategoryNode } from '@/lib/questionReview/types';
 
 function parseScope(searchParams: URLSearchParams) {
   const section = searchParams.get('section');
@@ -28,6 +29,15 @@ function categoryErrorResponse(error: unknown) {
     return NextResponse.json({ error: '分类名称已存在' }, { status: 409 });
   }
   throw error;
+}
+
+function activeCategoryTree(categories: CategoryNode[]) {
+  return categories
+    .filter((category) => category.status === 'active')
+    .map((category) => ({
+      ...category,
+      children: category.children.filter((child) => child.status === 'active'),
+    }));
 }
 
 export async function GET(req: NextRequest) {
@@ -58,6 +68,7 @@ export async function POST(req: NextRequest) {
     || body.section !== 'reading'
     || ![5, 6, 7].includes(body.part as number)
     || typeof body.name !== 'string'
+    || (body.includeInactive !== undefined && typeof body.includeInactive !== 'boolean')
     || (body.parentId !== undefined && body.parentId !== null
       && (!Number.isInteger(body.parentId) || (body.parentId as number) <= 0))
     || (body.sortOrder !== undefined && !Number.isInteger(body.sortOrder))) {
@@ -74,7 +85,16 @@ export async function POST(req: NextRequest) {
       name: body.name,
       sortOrder: body.sortOrder as number | undefined,
     });
-    return NextResponse.json(category, { status: 201 });
+    const managedCategories = await listCategoryTree(client, {
+      section: body.section,
+      part: body.part as 5 | 6 | 7,
+      includeInactive: body.includeInactive === true,
+    });
+    return NextResponse.json({
+      category,
+      categories: activeCategoryTree(managedCategories),
+      managedCategories,
+    }, { status: 201 });
   } catch (error) {
     return categoryErrorResponse(error);
   } finally {
