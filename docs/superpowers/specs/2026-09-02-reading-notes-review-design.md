@@ -184,7 +184,7 @@ Support add, rename, reorder, merge, and delete.
 
 ## 7. Bulk Import
 
-Support `.docx` and PDF files from the `阅读笔记` tab.
+Support only Word `.docx` files from the `阅读笔记` tab. Legacy `.doc`, PDF, and other file types are rejected by both the file picker and the server with the message `阅读笔记批量导入仅支持 Word(.docx) 文件`. This restriction applies only to reading-note import and does not change listening-note import.
 
 The expected document structure is:
 
@@ -206,7 +206,6 @@ A date applies to following content until another date appears. Missing dates de
 Use local deterministic parsing first:
 
 - DOCX paragraphs and tables are converted to sanitized semantic rich text;
-- PDF text and tables are reconstructed when their structure can be identified reliably;
 - no paid API is called during successful local parsing.
 
 If parsing confidence is insufficient, show an explicit `使用 AI 重新解析` action. Only that user action invokes DeepSeek. Development and automated tests use mocks unless a separately approved, cost-capped real call is required.
