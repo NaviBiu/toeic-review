@@ -12,7 +12,7 @@ const NOTES_MARKER = /^备注\s*[：:]\s*(.*)$/;
 
 const INVALID_FILE_TYPE_MESSAGE = '阅读笔记批量导入仅支持 Word(.docx) 文件';
 const MAX_DOCX_BYTES = 5 * 1024 * 1024;
-const SEMANTIC_BLOCK_TAGS = new Set(['P', 'UL', 'OL', 'TABLE']);
+const SEMANTIC_BLOCK_TAGS = new Set(['P', 'BR', 'UL', 'OL', 'TABLE']);
 const SHOW_TEXT = 4;
 
 type SemanticBlock = {
@@ -23,12 +23,15 @@ type SemanticBlock = {
 };
 
 export function validateReadingDocx(file: { name: string; size: number; buffer: Buffer }): void {
+  if (!file.name.toLocaleLowerCase('en-US').endsWith('.docx')) {
+    throw new Error(INVALID_FILE_TYPE_MESSAGE);
+  }
+
   if (file.size > MAX_DOCX_BYTES) {
     throw new Error('文件超过 5MB 上限');
   }
 
   if (
-    !file.name.toLocaleLowerCase('en-US').endsWith('.docx') ||
     file.size < 1 ||
     file.buffer.length < 2 ||
     file.buffer[0] !== 0x50 ||
@@ -51,7 +54,7 @@ function semanticBlocks(document: Document): SemanticBlock[] {
   return Array.from(document.body.childNodes).flatMap((node) => {
     const tagName = node.nodeType === node.ELEMENT_NODE ? (node as Element).tagName : null;
     const text = node.textContent?.trim() ?? '';
-    if (!text || (tagName && !SEMANTIC_BLOCK_TAGS.has(tagName))) {
+    if ((tagName && !SEMANTIC_BLOCK_TAGS.has(tagName)) || (!tagName && !text)) {
       return [];
     }
     return [{ html: serializeNode(node), node, tagName, text }];
@@ -100,6 +103,26 @@ function formatDate(year: string, month: string, day: string) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
+function isValidCalendarDate(year: string, month: string, day: string) {
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+  const numericDay = Number(day);
+  const isLeapYear =
+    numericYear % 4 === 0 && (numericYear % 100 !== 0 || numericYear % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return (
+    numericMonth >= 1 &&
+    numericMonth <= 12 &&
+    numericDay >= 1 &&
+    numericDay <= daysInMonth[numericMonth - 1]
+  );
+}
+
+function normalizeCategoryName(value: string) {
+  return value.replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim();
+}
+
 function looksLikeMarker(text: string) {
   return /^(?:日期|分类(?:[一二三四五六七八九十\d]+)?|(?:\d+[.、．]\s*)?知识点|备注)/.test(
     text,
@@ -110,7 +133,7 @@ export async function parseReadingDocx(
   buffer: Buffer,
   importDate: string,
 ): Promise<ReadingImportCandidate[]> {
-  const converted = await mammoth.convertToHtml({ buffer });
+  const converted = await mammoth.convertToHtml({ buffer }, { ignoreEmptyParagraphs: false });
   const document = createSanitizedReadingDocumentServer(converted.value);
   const candidates: ReadingImportCandidate[] = [];
 
@@ -169,18 +192,23 @@ export async function parseReadingDocx(
   };
 
   for (const block of semanticBlocks(document)) {
+    if (!block.text && !currentContentNodes) {
+      continue;
+    }
+
     if (block.tagName === 'P') {
       const dateMatch = block.text.match(DATE_MARKER);
-      if (dateMatch) {
+      if (dateMatch && isValidCalendarDate(dateMatch[1], dateMatch[2], dateMatch[3])) {
         flush();
         currentDate = formatDate(dateMatch[1], dateMatch[2], dateMatch[3]);
         continue;
       }
 
       const categoryMatch = block.text.match(CATEGORY_MARKER);
-      if (categoryMatch) {
+      const categoryName = categoryMatch ? normalizeCategoryName(categoryMatch[1]) : '';
+      if (categoryMatch && categoryName) {
         flush();
-        currentCategory = categoryMatch[1].trim();
+        currentCategory = categoryName;
         continue;
       }
 
@@ -205,7 +233,9 @@ export async function parseReadingDocx(
     const contentNodes = currentContentNodes as string[] | null;
     if (contentNodes) {
       if (currentNotes) {
-        currentNotes.push(block.text);
+        if (block.text) {
+          currentNotes.push(block.text);
+        }
       } else {
         contentNodes.push(block.html);
       }

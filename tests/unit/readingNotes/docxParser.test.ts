@@ -59,10 +59,71 @@ describe('reading Word parser', () => {
     });
   });
 
+  it('preserves blank semantic blocks inside active knowledge content', async () => {
+    const buffer = Buffer.from('local fixture');
+    const convertToHtml = vi.spyOn(mammoth, 'convertToHtml').mockResolvedValueOnce({
+      value:
+        '\n  <p>分类：版式</p><p>知识点：line one</p><p><br></p><br><p>line two</p>  \n',
+      messages: [],
+    });
+
+    const items = await parseReadingDocx(buffer, '2026-09-02');
+
+    expect(items).toHaveLength(1);
+    expect(items[0].contentHtml).toBe(
+      '<p>line one</p><p><br></p><br><p>line two</p>',
+    );
+    expect(convertToHtml).toHaveBeenCalledWith({ buffer }, { ignoreEmptyParagraphs: false });
+  });
+
+  it('preserves a calendar-invalid date marker as low-confidence content', async () => {
+    vi.spyOn(mammoth, 'convertToHtml').mockResolvedValueOnce({
+      value:
+        '<p>分类：日期</p><p>日期：2026年13月40日</p><p>知识点：calendar validation</p>',
+      messages: [],
+    });
+
+    const items = await parseReadingDocx(Buffer.from('local fixture'), '2026-09-02');
+
+    expect(items[0]).toMatchObject({
+      categoryName: '日期',
+      noteDate: '2026-09-02',
+      confidence: 'low',
+    });
+    expect(items[0].contentHtml).toContain('<p>日期：2026年13月40日</p>');
+    expect(items[0].issue).toContain('无法识别标记：日期：2026年13月40日');
+  });
+
+  it.each(['   ', '\u200B'])('preserves a whitespace-only category marker (%j)', async (space) => {
+    vi.spyOn(mammoth, 'convertToHtml').mockResolvedValueOnce({
+      value: `<p>分类：${space}</p><p>知识点：category validation</p>`,
+      messages: [],
+    });
+
+    const items = await parseReadingDocx(Buffer.from('local fixture'), '2026-09-02');
+
+    expect(items[0]).toMatchObject({
+      categoryName: '未分类',
+      confidence: 'low',
+    });
+    expect(items[0].contentHtml).toContain('<p>分类：');
+    expect(items[0].issue).toContain('无法识别标记：分类：');
+  });
+
   it('accepts a valid docx filename, size, and ZIP signature', () => {
     expect(() =>
       validateReadingDocx({ name: 'NOTES.DOCX', size: fixtureBuffer.length, buffer: fixtureBuffer }),
     ).not.toThrow();
+  });
+
+  it('rejects an oversized unsupported file with the file-type message', () => {
+    expect(() =>
+      validateReadingDocx({
+        name: 'notes.pdf',
+        size: 5 * 1024 * 1024 + 1,
+        buffer: Buffer.from([0x50, 0x4b]),
+      }),
+    ).toThrow('阅读笔记批量导入仅支持 Word(.docx) 文件');
   });
 
   it('rejects unsupported, empty, oversized, and non-ZIP files with approved messages', () => {
