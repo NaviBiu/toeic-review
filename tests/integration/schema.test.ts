@@ -4,6 +4,32 @@ import { resolve } from 'node:path';
 import { withTestClient } from './setup';
 
 describe('schema constraints', () => {
+  it('stores reading notes independently with a protected uncategorized category', async () => {
+    await withTestClient(async (client) => {
+      const { rows: [category] } = await client.query(
+        `SELECT id, name, is_default FROM reading_note_categories
+         WHERE name = '未分类' AND status = 'active'`,
+      );
+      expect(category).toMatchObject({ name: '未分类', is_default: true });
+
+      const { rows: [note] } = await client.query(
+        `INSERT INTO reading_notes
+         (category_id, content_html, content_text, content_hash, note_date, next_review_date)
+         VALUES ($1, '<p>as a result</p>', 'as a result', 'hash-a', '2026-09-01', '2026-09-02')
+         RETURNING status, correct_streak, correct_count, wrong_count`,
+        [category.id],
+      );
+      expect(note).toEqual({ status: 'active', correct_streak: 0, correct_count: 0, wrong_count: 0 });
+
+      await expect(client.query(
+        `INSERT INTO reading_notes
+         (category_id, content_html, content_text, content_hash, note_date, next_review_date)
+         VALUES ($1, '<p>duplicate</p>', 'duplicate', 'hash-a', '2026-09-02', '2026-09-02')`,
+        [category.id],
+      )).rejects.toThrow();
+    });
+  });
+
   it('defines a safely backfilled grading snapshot migration', () => {
     const migrationPath = resolve(
       process.cwd(),
