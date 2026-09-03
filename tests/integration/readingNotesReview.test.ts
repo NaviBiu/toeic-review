@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { VercelClient } from '@vercel/postgres';
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@/lib/db';
 import { createReadingCategory } from '@/lib/readingNotes/categories';
@@ -8,9 +9,20 @@ import {
   getReadingQueuePage,
   recordReadingAttempt,
 } from '@/lib/readingNotes/review';
-import { withTestClient } from './setup';
 
-function withNestedTransactions(client: Parameters<Parameters<typeof withTestClient>[0]>[0]) {
+async function withReadingReviewClient(fn: (client: VercelClient) => Promise<void>) {
+  const client = createClient();
+  await client.connect();
+  await client.query('BEGIN');
+  try {
+    await fn(client);
+  } finally {
+    await client.query('ROLLBACK');
+    await client.end();
+  }
+}
+
+function withNestedTransactions(client: VercelClient) {
   let sequence = 0;
   const savepoints: string[] = [];
   return new Proxy(client, {
@@ -41,7 +53,7 @@ function withNestedTransactions(client: Parameters<Parameters<typeof withTestCli
 
 describe('reading note review transactions', () => {
   it('keeps creation idempotent, corrects from before-state, and rejects stale corrections', async () => {
-    await withTestClient(async (client) => {
+    await withReadingReviewClient(async (client) => {
       const repositoryClient = withNestedTransactions(client);
       const today = '2026-09-03';
       const category = await createReadingCategory(repositoryClient, `Review ${Date.now()}`);
@@ -156,7 +168,7 @@ describe('reading note review transactions', () => {
   }, 60_000);
 
   it('returns later due notes on repeated queue calls without a daily cap', async () => {
-    await withTestClient(async (client) => {
+    await withReadingReviewClient(async (client) => {
       const repositoryClient = withNestedTransactions(client);
       const today = '2026-09-03';
       const category = await createReadingCategory(repositoryClient, `Queue ${Date.now()}`);

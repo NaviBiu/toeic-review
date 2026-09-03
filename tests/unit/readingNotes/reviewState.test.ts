@@ -68,6 +68,22 @@ function attemptRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function correctionRow(overrides: Record<string, unknown> = {}) {
+  const attempt = attemptRow();
+  return {
+    ...noteRow(),
+    attempt_id: attempt.id,
+    request_id: attempt.request_id,
+    note_id: attempt.note_id,
+    decision: attempt.decision,
+    review_date: attempt.review_date,
+    before_state: attempt.before_state,
+    after_state: attempt.after_state,
+    is_latest: true,
+    ...overrides,
+  };
+}
+
 describe('reading review session state', () => {
   it('requeues an unknown note at the end of the session', () => {
     expect(applyOptimisticDecision(baseState(), 7, 'unknown')).toMatchObject({
@@ -168,11 +184,8 @@ describe('reading review repository', () => {
   it('records an unknown attempt and updates its locked note once', async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes('FOR UPDATE OF note')) return { rows: [noteRow()] };
-      if (sql.includes('INSERT INTO reading_note_review_attempts')) {
-        return { rows: [attemptRow()] };
-      }
-      if (sql.includes('UPDATE reading_notes')) {
-        return { rows: [noteRow({ wrong_count: 1, last_reviewed_date: today })] };
+      if (sql.includes('WITH existing AS MATERIALIZED')) {
+        return { rows: [attemptRow({ inserted: true, updated_note_id: 7 })] };
       }
       return { rows: [] };
     });
@@ -189,10 +202,14 @@ describe('reading review repository', () => {
       attempt: { id: 31, decision: 'unknown' },
       note: { id: 7, wrongCount: 1, lastReviewedDate: today },
     });
-    expect(query.mock.calls.map(([sql]) => sql)).toEqual(expect.arrayContaining([
-      'BEGIN', 'COMMIT',
-    ]));
-    expect(query.mock.calls.filter(([sql]) => sql.includes('UPDATE reading_notes'))).toHaveLength(1);
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN',
+      expect.stringContaining('FOR UPDATE OF note'),
+      expect.stringContaining('WITH existing AS MATERIALIZED'),
+      'COMMIT',
+    ]);
+    expect(query.mock.calls[2][0]).toContain('UPDATE reading_notes');
   });
 
   it('returns a UUID-conflicting attempt without incrementing the note again', async () => {
@@ -200,8 +217,9 @@ describe('reading review repository', () => {
       if (sql.includes('FOR UPDATE OF note')) {
         return { rows: [noteRow({ wrong_count: 1, last_reviewed_date: today })] };
       }
-      if (sql.includes('INSERT INTO reading_note_review_attempts')) return { rows: [] };
-      if (sql.includes('WHERE attempt.request_id = $1')) return { rows: [attemptRow()] };
+      if (sql.includes('WITH existing AS MATERIALIZED')) {
+        return { rows: [attemptRow({ inserted: false, updated_note_id: null })] };
+      }
       return { rows: [] };
     });
     const client = { query } as unknown as VercelClient;
@@ -212,15 +230,17 @@ describe('reading review repository', () => {
       decision: 'unknown',
       today,
     })).resolves.toMatchObject({ attempt: { id: 31 }, note: { wrongCount: 1 } });
-    expect(query.mock.calls.some(([sql]) => sql.includes('UPDATE reading_notes'))).toBe(false);
+    expect(query).toHaveBeenCalledTimes(4);
     expect(query.mock.calls.at(-1)?.[0]).toBe('COMMIT');
   });
 
   it('returns the original UUID attempt when a retry arrives on a later day', async () => {
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes('WHERE attempt.request_id = $1')) return { rows: [attemptRow()] };
       if (sql.includes('FOR UPDATE OF note')) {
         return { rows: [noteRow({ wrong_count: 1, last_reviewed_date: today })] };
+      }
+      if (sql.includes('WITH existing AS MATERIALIZED')) {
+        return { rows: [attemptRow({ inserted: false, updated_note_id: null })] };
       }
       return { rows: [] };
     });
@@ -235,7 +255,7 @@ describe('reading review repository', () => {
       attempt: { id: 31, reviewDate: today },
       note: { wrongCount: 1 },
     });
-    expect(query.mock.calls.some(([sql]) => sql.includes('UPDATE reading_notes'))).toBe(false);
+    expect(query).toHaveBeenCalledTimes(4);
   });
 
   it('corrects the same latest attempt exclusively from before_state', async () => {
@@ -250,16 +270,17 @@ describe('reading review repository', () => {
       },
     });
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes('FOR UPDATE OF attempt')) return { rows: [stored] };
-      if (sql.includes('FOR UPDATE OF note')) {
-        return { rows: [noteRow({ correct_streak: 99, correct_count: 99, wrong_count: 99 })] };
+      if (sql.includes('WITH locked_attempt AS MATERIALIZED')) {
+        return { rows: [correctionRow({
+          before_state: stored.before_state,
+          correct_streak: 99,
+          correct_count: 99,
+          wrong_count: 99,
+        })] };
       }
-      if (sql.includes('SELECT id') && sql.includes('ORDER BY id DESC')) return { rows: [{ id: 31 }] };
-      if (sql.includes('UPDATE reading_note_review_attempts')) {
-        return { rows: [attemptRow({ ...stored, decision: 'known' })] };
-      }
-      if (sql.includes('UPDATE reading_notes')) {
-        return { rows: [noteRow({
+      if (sql.includes('WITH updated_attempt AS')) {
+        return { rows: [correctionRow({
+          decision: 'known',
           correct_streak: 3,
           correct_count: 5,
           wrong_count: 1,
@@ -277,15 +298,19 @@ describe('reading review repository', () => {
       today,
     })).resolves.toMatchObject({ attempt: { id: 31, decision: 'known' } });
 
-    const noteUpdate = query.mock.calls.find(([sql]) => sql.includes('UPDATE reading_notes'));
-    expect(noteUpdate?.[1]).toEqual([3, 5, 1, 'active', '2026-09-07', today, 7]);
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls[2][0]).toContain('UPDATE reading_note_review_attempts');
+    expect(query.mock.calls[2][0]).toContain('UPDATE reading_notes');
+    expect(query.mock.calls[2][1]).toEqual([
+      31, 'known', expect.any(String), 3, 5, 1, 'active', '2026-09-07', today, 7,
+    ]);
   });
 
   it('rolls back when correction is no longer the note latest attempt', async () => {
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes('FOR UPDATE OF attempt')) return { rows: [attemptRow()] };
-      if (sql.includes('FOR UPDATE OF note')) return { rows: [noteRow()] };
-      if (sql.includes('SELECT id') && sql.includes('ORDER BY id DESC')) return { rows: [{ id: 32 }] };
+      if (sql.includes('WITH locked_attempt AS MATERIALIZED')) {
+        return { rows: [correctionRow({ is_latest: false })] };
+      }
       return { rows: [] };
     });
     const client = { query } as unknown as VercelClient;
@@ -298,6 +323,7 @@ describe('reading review repository', () => {
       kind: 'conflict',
       message: '只能修改该知识点最近一次复盘结果',
     });
+    expect(query).toHaveBeenCalledTimes(3);
     expect(query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
 });

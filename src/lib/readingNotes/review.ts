@@ -23,6 +23,22 @@ type AttemptRow = {
   after_state: unknown;
 };
 
+type AttemptWriteRow = AttemptRow & {
+  inserted: boolean;
+  updated_note_id: number | null;
+};
+
+type CorrectionRow = ReadingNoteRow & {
+  attempt_id: number;
+  request_id: string;
+  note_id: number;
+  decision: ReadingDecision;
+  review_date: string;
+  before_state: unknown;
+  after_state: unknown;
+  is_latest?: boolean;
+};
+
 export type ReadingSessionState = {
   queue: number[];
   cursor: number;
@@ -170,6 +186,18 @@ function mapAttempt(row: AttemptRow): ReadingReviewAttempt {
   };
 }
 
+function mapCorrectionAttempt(row: CorrectionRow) {
+  return mapAttempt({
+    id: row.attempt_id,
+    request_id: row.request_id,
+    note_id: row.note_id,
+    decision: row.decision,
+    review_date: row.review_date,
+    before_state: row.before_state,
+    after_state: row.after_state,
+  });
+}
+
 function matchesAttemptInput(
   attempt: AttemptRow,
   input: { noteId: number; decision: ReadingDecision },
@@ -215,30 +243,6 @@ async function findAttemptByRequestId(
     [requestId],
   );
   return rows[0] as AttemptRow | undefined;
-}
-
-async function updateNoteState(
-  client: VercelClient,
-  noteId: number,
-  state: ReadingSrsSnapshot,
-): Promise<ReadingNote> {
-  const { rows } = await client.query(
-    `WITH updated AS (
-       UPDATE reading_notes
-       SET correct_streak = $1, correct_count = $2, wrong_count = $3,
-         status = $4, next_review_date = $5, last_reviewed_date = $6,
-         updated_at = now()
-       WHERE id = $7 AND status <> 'deleted'
-       RETURNING *
-     )
-     SELECT updated.*, category.name AS category_name
-     FROM updated
-     JOIN reading_note_categories category ON category.id = updated.category_id`,
-    [state.correctStreak, state.correctCount, state.wrongCount, state.status,
-      state.nextReviewDate, state.lastReviewedDate, noteId],
-  );
-  if (!rows[0]) throw new ReadingReviewError('阅读知识点不存在', 'not_found');
-  return mapReadingNoteRow(rows[0] as ReadingNoteRow);
 }
 
 export async function getReadingPendingCount(
@@ -314,34 +318,39 @@ export async function recordReadingAttempt(
   validateToday(input.today);
 
   return transaction(client, async () => {
-    const foundBeforeLock = await findAttemptByRequestId(client, input.requestId);
     const note = await findLockedNote(client, input.noteId);
-    if (foundBeforeLock) {
-      const refreshed = await findAttemptByRequestId(client, input.requestId);
-      if (!refreshed || !matchesAttemptInput(refreshed, input)) {
-        throw new ReadingReviewError('请求标识已用于其他复盘', 'conflict');
-      }
-      return { attempt: mapAttempt(refreshed), note };
-    }
-
-    const foundAfterLock = await findAttemptByRequestId(client, input.requestId);
-    if (foundAfterLock) {
-      if (!matchesAttemptInput(foundAfterLock, input)) {
-        throw new ReadingReviewError('请求标识已用于其他复盘', 'conflict');
-      }
-      return { attempt: mapAttempt(foundAfterLock), note };
-    }
-
     const beforeState = snapshotNote(note);
     const afterState = applyDecision(beforeState, input.decision, input.today);
     const { rows } = await client.query(
-      `INSERT INTO reading_note_review_attempts
-         (request_id, note_id, decision, review_date, before_state, after_state)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
-       ON CONFLICT (request_id) DO NOTHING
-       RETURNING id, request_id, note_id, decision, review_date, before_state, after_state`,
+      `WITH existing AS MATERIALIZED (
+         SELECT id, request_id, note_id, decision, review_date, before_state, after_state
+         FROM reading_note_review_attempts
+         WHERE request_id = $1
+       ), inserted AS (
+         INSERT INTO reading_note_review_attempts
+           (request_id, note_id, decision, review_date, before_state, after_state)
+         SELECT $1, $2, $3, $4, $5::jsonb, $6::jsonb
+         WHERE NOT EXISTS (SELECT 1 FROM existing)
+         ON CONFLICT (request_id) DO NOTHING
+         RETURNING id, request_id, note_id, decision, review_date, before_state, after_state
+       ), updated_note AS (
+         UPDATE reading_notes
+         SET correct_streak = $7, correct_count = $8, wrong_count = $9,
+           status = $10, next_review_date = $11, last_reviewed_date = $12,
+           updated_at = now()
+         WHERE id = $2 AND EXISTS (SELECT 1 FROM inserted)
+         RETURNING id
+       ), chosen AS (
+         SELECT existing.*, false AS inserted FROM existing
+         UNION ALL
+         SELECT inserted.*, true AS inserted FROM inserted
+       )
+       SELECT chosen.*, (SELECT id FROM updated_note) AS updated_note_id
+       FROM chosen`,
       [input.requestId, input.noteId, input.decision, input.today,
-        JSON.stringify(beforeState), JSON.stringify(afterState)],
+        JSON.stringify(beforeState), JSON.stringify(afterState), afterState.correctStreak,
+        afterState.correctCount, afterState.wrongCount, afterState.status,
+        afterState.nextReviewDate, afterState.lastReviewedDate],
     );
 
     if (!rows[0]) {
@@ -352,10 +361,16 @@ export async function recordReadingAttempt(
       }
       return { attempt: mapAttempt(attemptRow), note };
     }
-
+    const stored = rows[0] as AttemptWriteRow;
+    if (!matchesAttemptInput(stored, input)) {
+      throw new ReadingReviewError('请求标识已用于其他复盘', 'conflict');
+    }
+    if (stored.inserted && Number(stored.updated_note_id) !== input.noteId) {
+      throw new ReadingReviewError('阅读知识点状态已变化，请重试', 'conflict');
+    }
     return {
-      attempt: mapAttempt(rows[0] as AttemptRow),
-      note: await updateNoteState(client, input.noteId, afterState),
+      attempt: mapAttempt(stored),
+      note: stored.inserted ? { ...note, ...afterState } : note,
     };
   });
 }
@@ -370,40 +385,75 @@ export async function correctReadingAttempt(
 
   return transaction(client, async () => {
     const { rows } = await client.query(
-      `SELECT attempt.id, attempt.request_id, attempt.note_id, attempt.decision,
-         attempt.review_date, attempt.before_state, attempt.after_state
-       FROM reading_note_review_attempts attempt
-       WHERE attempt.id = $1
-       FOR UPDATE OF attempt`,
+      `WITH locked_attempt AS MATERIALIZED (
+         SELECT attempt.id, attempt.request_id, attempt.note_id, attempt.decision,
+           attempt.review_date, attempt.before_state, attempt.after_state
+         FROM reading_note_review_attempts attempt
+         WHERE attempt.id = $1
+         FOR UPDATE OF attempt
+       ), locked_note AS MATERIALIZED (
+         SELECT note.*, category.name AS category_name
+         FROM reading_notes note
+         JOIN locked_attempt attempt ON attempt.note_id = note.id
+         JOIN reading_note_categories category ON category.id = note.category_id
+         WHERE note.status <> 'deleted'
+         FOR UPDATE OF note
+       ), latest AS (
+         SELECT latest_attempt.id
+         FROM locked_note note
+         JOIN LATERAL (
+           SELECT id
+           FROM reading_note_review_attempts
+           WHERE note_id = note.id
+           ORDER BY id DESC
+           LIMIT 1
+         ) latest_attempt ON true
+       )
+       SELECT attempt.id AS attempt_id, attempt.request_id, attempt.note_id,
+         attempt.decision, attempt.review_date, attempt.before_state, attempt.after_state,
+         note.*, attempt.id = latest.id AS is_latest
+       FROM locked_attempt attempt
+       JOIN locked_note note ON note.id = attempt.note_id
+       JOIN latest ON true`,
       [input.attemptId],
     );
-    const current = rows[0] as AttemptRow | undefined;
+    const current = rows[0] as CorrectionRow | undefined;
     if (!current) throw new ReadingReviewError('复盘记录不存在', 'not_found');
-
-    await findLockedNote(client, Number(current.note_id));
-    const latest = await client.query(
-      `SELECT id
-       FROM reading_note_review_attempts
-       WHERE note_id = $1
-       ORDER BY id DESC
-       LIMIT 1`,
-      [current.note_id],
-    );
-    if (Number(latest.rows[0]?.id) !== input.attemptId) {
+    if (!current.is_latest) {
       throw new ReadingReviewError('只能修改该知识点最近一次复盘结果', 'conflict');
     }
 
     const afterState = applyDecision(snapshotFrom(current.before_state), input.decision, input.today);
     const updated = await client.query(
-      `UPDATE reading_note_review_attempts
-       SET decision = $2, after_state = $3::jsonb, corrected_at = now(), updated_at = now()
-       WHERE id = $1
-       RETURNING id, request_id, note_id, decision, review_date, before_state, after_state`,
-      [input.attemptId, input.decision, JSON.stringify(afterState)],
+      `WITH updated_attempt AS (
+         UPDATE reading_note_review_attempts
+         SET decision = $2, after_state = $3::jsonb,
+           corrected_at = now(), updated_at = now()
+         WHERE id = $1
+         RETURNING id, request_id, note_id, decision, review_date, before_state, after_state
+       ), updated_note AS (
+         UPDATE reading_notes
+         SET correct_streak = $4, correct_count = $5, wrong_count = $6,
+           status = $7, next_review_date = $8, last_reviewed_date = $9,
+           updated_at = now()
+         WHERE id = $10 AND status <> 'deleted'
+         RETURNING *
+       )
+       SELECT attempt.id AS attempt_id, attempt.request_id, attempt.note_id,
+         attempt.decision, attempt.review_date, attempt.before_state, attempt.after_state,
+         note.*, category.name AS category_name
+       FROM updated_attempt attempt
+       JOIN updated_note note ON note.id = attempt.note_id
+       JOIN reading_note_categories category ON category.id = note.category_id`,
+      [input.attemptId, input.decision, JSON.stringify(afterState), afterState.correctStreak,
+        afterState.correctCount, afterState.wrongCount, afterState.status,
+        afterState.nextReviewDate, afterState.lastReviewedDate, current.note_id],
     );
+    const result = updated.rows[0] as CorrectionRow | undefined;
+    if (!result) throw new ReadingReviewError('阅读知识点状态已变化，请重试', 'conflict');
     return {
-      attempt: mapAttempt(updated.rows[0] as AttemptRow),
-      note: await updateNoteState(client, Number(current.note_id), afterState),
+      attempt: mapCorrectionAttempt(result),
+      note: mapReadingNoteRow(result),
     };
   });
 }

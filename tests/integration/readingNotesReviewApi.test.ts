@@ -1,8 +1,21 @@
+import type { VercelClient } from '@vercel/postgres';
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { withTestClient } from './setup';
+import { createClient } from '@/lib/db';
 
-type TestClient = Parameters<Parameters<typeof withTestClient>[0]>[0];
+type TestClient = VercelClient;
+
+async function withReadingReviewClient(fn: (client: VercelClient) => Promise<void>) {
+  const client = createClient();
+  await client.connect();
+  await client.query('BEGIN');
+  try {
+    await fn(client);
+  } finally {
+    await client.query('ROLLBACK');
+    await client.end();
+  }
+}
 
 function asRouteClient(client: TestClient) {
   let sequence = 0;
@@ -79,7 +92,7 @@ describe('reading review API', () => {
   });
 
   it('clamps queue limits and exposes count, attempt, and correction contracts', async () => {
-    await withTestClient(async (client) => {
+    await withReadingReviewClient(async (client) => {
       const routes = await loadRoutes(client);
       const categoryResponse = await routes.categoryRoute.POST(new NextRequest(
         'http://localhost/api/reading-note-categories',
@@ -137,7 +150,7 @@ describe('reading review API', () => {
   }, 60_000);
 
   it('returns 404 for a deleted note and 409 for a stale correction', async () => {
-    await withTestClient(async (client) => {
+    await withReadingReviewClient(async (client) => {
       const routes = await loadRoutes(client);
       const categoryResponse = await routes.categoryRoute.POST(new NextRequest(
         'http://localhost/api/reading-note-categories',
