@@ -3,7 +3,7 @@ import type { VercelClient } from '@vercel/postgres';
 import { sanitizeReadingHtmlServer } from './richContent.server';
 import type { ReadingNote, ReadingNoteStatus, ReadingSrsSnapshot } from './types';
 
-type NoteRow = {
+export type ReadingNoteRow = {
   id: number;
   category_id: number;
   category_name: string;
@@ -87,7 +87,7 @@ export function prepareReadingNoteContent(input: {
   };
 }
 
-function mapNote(row: NoteRow): ReadingNote {
+export function mapReadingNoteRow(row: ReadingNoteRow): ReadingNote {
   return {
     id: Number(row.id),
     categoryId: Number(row.category_id),
@@ -133,7 +133,7 @@ async function findReadingNote(client: VercelClient, id: number, forUpdate = fal
     [id],
   );
   if (!rows[0]) throw new ReadingNoteError('阅读知识点不存在', 'not_found');
-  return mapNote(rows[0] as NoteRow);
+  return mapReadingNoteRow(rows[0] as ReadingNoteRow);
 }
 
 async function transaction<T>(client: VercelClient, operation: () => Promise<T>): Promise<T> {
@@ -193,7 +193,7 @@ export async function listReadingNotes(
      LIMIT $${values.length - 1} OFFSET $${values.length}`,
     values,
   );
-  let total = rows[0] ? Number((rows[0] as NoteRow).total_count) : 0;
+  let total = rows[0] ? Number((rows[0] as ReadingNoteRow).total_count) : 0;
   if (rows.length === 0) {
     const { rows: countRows } = await client.query(
       `SELECT COUNT(*)::int AS total_count
@@ -205,7 +205,7 @@ export async function listReadingNotes(
     total = Number(countRows[0]?.total_count ?? 0);
   }
   return {
-    items: rows.map((row) => mapNote(row as NoteRow)),
+    items: rows.map((row) => mapReadingNoteRow(row as ReadingNoteRow)),
     total,
     page,
     pageSize,
@@ -248,7 +248,7 @@ export async function createReadingNote(
         trimNotes(input.notes), content.noteDate, input.today],
     );
     if (!rows[0]) throw new ReadingNoteError('分类状态已变化，请重试', 'conflict');
-    return mapNote(rows[0] as NoteRow);
+    return mapReadingNoteRow(rows[0] as ReadingNoteRow);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new ReadingNoteError('该分类中已存在相同知识点', 'conflict');
@@ -304,7 +304,7 @@ export async function updateReadingNote(
         input.noteDate ?? current.noteDate, id],
     );
     if (!rows[0]) throw new ReadingNoteError('知识点状态已变化，请重试', 'conflict');
-    return mapNote(rows[0] as NoteRow);
+    return mapReadingNoteRow(rows[0] as ReadingNoteRow);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new ReadingNoteError('该分类中已存在相同知识点', 'conflict');
@@ -340,7 +340,7 @@ export async function setReadingNoteStatus(
       [status, today, id],
     );
     if (!rows[0]) throw new ReadingNoteError('知识点状态已变化，请重试', 'conflict');
-    return mapNote(rows[0] as NoteRow);
+    return mapReadingNoteRow(rows[0] as ReadingNoteRow);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new ReadingNoteError('该分类中已存在相同知识点', 'conflict');
@@ -384,8 +384,8 @@ export async function softDeleteReadingNote(
        JOIN reading_note_categories category ON category.id = updated.category_id`,
       [id],
     );
-    const row = rows[0] as NoteRow;
-    return { note: mapNote(row), snapshot, deletedAt: row.deleted_at as string };
+    const row = rows[0] as ReadingNoteRow;
+    return { note: mapReadingNoteRow(row), snapshot, deletedAt: row.deleted_at as string };
   });
 }
 
@@ -434,7 +434,7 @@ export async function restoreReadingNoteSnapshot(
       if (!rows[0]) {
         throw new ReadingNoteError('删除状态已变化，无法撤销', 'conflict');
       }
-      return mapNote(rows[0] as NoteRow);
+      return mapReadingNoteRow(rows[0] as ReadingNoteRow);
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
