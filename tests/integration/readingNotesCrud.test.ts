@@ -131,7 +131,12 @@ describe('reading note CRUD', () => {
       });
       const mastered = await setReadingNoteStatus(repositoryClient, created.id, 'mastered', '2026-09-02');
       const deleted = await softDeleteReadingNote(repositoryClient, mastered.id);
-      const restored = await restoreReadingNoteSnapshot(repositoryClient, mastered.id, deleted.snapshot);
+      const restored = await restoreReadingNoteSnapshot(
+        repositoryClient,
+        mastered.id,
+        deleted.snapshot,
+        deleted.deletedAt,
+      );
 
       expect(deleted.note.status).toBe('deleted');
       expect(restored).toMatchObject({

@@ -4,6 +4,7 @@ import {
   normalizeReadingCategoryName,
   planCategoryDeletion,
   reorderReadingCategories,
+  updateReadingCategory,
 } from '@/lib/readingNotes/categories';
 
 describe('reading note category validation', () => {
@@ -80,5 +81,24 @@ describe('reading note category validation', () => {
       expect.stringContaining('SELECT id FROM reading_note_categories'),
       'ROLLBACK',
     ]);
+  });
+
+  it('does not update a category deleted after the initial read', async () => {
+    const activeCategory = {
+      id: 12,
+      name: 'Active category',
+      sort_order: 2,
+      is_default: false,
+      status: 'active',
+      note_count: 3,
+    };
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [activeCategory] })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query } as unknown as VercelClient;
+
+    await expect(updateReadingCategory(client, 12, { name: 'Renamed' }))
+      .rejects.toMatchObject({ kind: 'conflict' });
+    expect(query.mock.calls[1][0]).toContain("status = 'active'");
   });
 });

@@ -59,6 +59,7 @@ describe('reading note validation', () => {
         nextReviewDate: null,
         lastReviewedDate: '2026-09-01',
       },
+      deletedAt: '2026-09-03 09:10:11.123456+00',
       expiresAt: 10_000,
     };
     const token = signReadingNoteUndoToken(payload, 'unit-test-secret');
@@ -77,6 +78,7 @@ describe('reading note validation', () => {
         nextReviewDate: '2026-09-03',
         lastReviewedDate: '2026-09-02',
       },
+      deletedAt: '2026-09-03 09:10:11.123456+00',
       expiresAt: 10_000,
     }, 'unit-test-secret');
 

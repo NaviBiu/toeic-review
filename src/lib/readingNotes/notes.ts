@@ -18,6 +18,7 @@ type NoteRow = {
   next_review_date: string | null;
   last_reviewed_date: string | null;
   total_count?: number | string;
+  deleted_at?: string;
 };
 
 export class ReadingNoteError extends Error {
@@ -180,6 +181,7 @@ export async function listReadingNotes(
   else where.push("note.status <> 'deleted'");
   if (input.dateFrom !== undefined) add('note.note_date >= ?', input.dateFrom);
   if (input.dateTo !== undefined) add('note.note_date <= ?', input.dateTo);
+  const filterValues = [...values];
   values.push(pageSize, (page - 1) * pageSize);
 
   const { rows } = await client.query(
@@ -191,9 +193,20 @@ export async function listReadingNotes(
      LIMIT $${values.length - 1} OFFSET $${values.length}`,
     values,
   );
+  let total = rows[0] ? Number((rows[0] as NoteRow).total_count) : 0;
+  if (rows.length === 0) {
+    const { rows: countRows } = await client.query(
+      `SELECT COUNT(*)::int AS total_count
+       FROM reading_notes note
+       JOIN reading_note_categories category ON category.id = note.category_id
+       WHERE ${where.join(' AND ')}`,
+      filterValues,
+    );
+    total = Number(countRows[0]?.total_count ?? 0);
+  }
   return {
     items: rows.map((row) => mapNote(row as NoteRow)),
-    total: rows[0] ? Number((rows[0] as NoteRow).total_count) : 0,
+    total,
     page,
     pageSize,
   };
@@ -353,23 +366,26 @@ function snapshotOf(note: ReadingNote): ReadingSrsSnapshot {
 export async function softDeleteReadingNote(
   client: VercelClient,
   id: number,
-): Promise<{ note: ReadingNote; snapshot: ReadingSrsSnapshot }> {
+): Promise<{ note: ReadingNote; snapshot: ReadingSrsSnapshot; deletedAt: string }> {
   return transaction(client, async () => {
     const current = await findReadingNote(client, id, true);
     const snapshot = snapshotOf(current);
     const { rows } = await client.query(
       `WITH updated AS (
          UPDATE reading_notes
-         SET status = 'deleted', next_review_date = NULL, updated_at = now()
+         SET status = 'deleted', next_review_date = NULL,
+           updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
          WHERE id = $1
          RETURNING *
        )
-       SELECT updated.*, category.name AS category_name
+       SELECT updated.*, category.name AS category_name,
+         updated.updated_at::text AS deleted_at
        FROM updated
        JOIN reading_note_categories category ON category.id = updated.category_id`,
       [id],
     );
-    return { note: mapNote(rows[0] as NoteRow), snapshot };
+    const row = rows[0] as NoteRow;
+    return { note: mapNote(row), snapshot, deletedAt: row.deleted_at as string };
   });
 }
 
@@ -388,8 +404,12 @@ export async function restoreReadingNoteSnapshot(
   client: VercelClient,
   id: number,
   snapshot: ReadingSrsSnapshot,
+  deletedAt: string,
 ): Promise<ReadingNote> {
   validateSnapshot(snapshot);
+  if (!deletedAt || !Number.isFinite(Date.parse(deletedAt))) {
+    throw new ReadingNoteError('撤销数据不正确', 'invalid');
+  }
   try {
     return await transaction(client, async () => {
       const current = await findReadingNote(client, id, true);
@@ -400,16 +420,20 @@ export async function restoreReadingNoteSnapshot(
         `WITH updated AS (
            UPDATE reading_notes
            SET status = $1, correct_streak = $2, correct_count = $3, wrong_count = $4,
-             next_review_date = $5, last_reviewed_date = $6, updated_at = now()
-           WHERE id = $7
+             next_review_date = $5, last_reviewed_date = $6,
+             updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+           WHERE id = $7 AND status = 'deleted' AND updated_at = $8::timestamptz
            RETURNING *
          )
          SELECT updated.*, category.name AS category_name
          FROM updated
          JOIN reading_note_categories category ON category.id = updated.category_id`,
         [snapshot.status, snapshot.correctStreak, snapshot.correctCount, snapshot.wrongCount,
-          snapshot.nextReviewDate, snapshot.lastReviewedDate, id],
+          snapshot.nextReviewDate, snapshot.lastReviewedDate, id, deletedAt],
       );
+      if (!rows[0]) {
+        throw new ReadingNoteError('删除状态已变化，无法撤销', 'conflict');
+      }
       return mapNote(rows[0] as NoteRow);
     });
   } catch (error) {
@@ -423,6 +447,7 @@ export async function restoreReadingNoteSnapshot(
 type UndoTokenPayload = {
   noteId: number;
   snapshot: ReadingSrsSnapshot;
+  deletedAt: string;
   expiresAt: number;
 };
 
@@ -458,7 +483,9 @@ export function verifyReadingNoteUndoToken(
   try {
     payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as UndoTokenPayload;
     if (!Number.isInteger(payload.noteId) || payload.noteId <= 0
-      || !Number.isFinite(payload.expiresAt)) throw new Error('invalid payload');
+      || !Number.isFinite(payload.expiresAt)
+      || typeof payload.deletedAt !== 'string'
+      || !Number.isFinite(Date.parse(payload.deletedAt))) throw new Error('invalid payload');
     validateSnapshot(payload.snapshot);
   } catch {
     throw new ReadingNoteError('撤销凭证不正确', 'invalid');

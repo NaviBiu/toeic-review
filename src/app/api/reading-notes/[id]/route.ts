@@ -89,6 +89,7 @@ export async function PATCH(
         client,
         id,
         restorePayload.snapshot,
+        restorePayload.deletedAt,
       ));
     }
     if (status.success) {
@@ -132,6 +133,7 @@ export async function DELETE(
     const undoToken = signReadingNoteUndoToken({
       noteId: id,
       snapshot: deleted.snapshot,
+      deletedAt: deleted.deletedAt,
       expiresAt: Date.now() + 5 * 60 * 1000,
     }, secret);
     return NextResponse.json({ note: deleted.note, undoToken });

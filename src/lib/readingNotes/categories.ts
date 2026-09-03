@@ -152,12 +152,15 @@ export async function updateReadingCategory(
          normalized_name = COALESCE($2, normalized_name),
          sort_order = COALESCE($3, sort_order),
          updated_at = now()
-       WHERE id = $4
+       WHERE id = $4 AND status = 'active'
        RETURNING id, name, sort_order, is_default, status,
          $5::int AS note_count`,
       [normalized?.name ?? null, normalized?.normalizedName ?? null,
         fields.sortOrder ?? null, id, Number(current.note_count)],
     );
+    if (!rows[0]) {
+      throw new ReadingCategoryError('分类状态已变化，请重试', 'conflict');
+    }
     return mapCategory(rows[0] as CategoryRow);
   } catch (error) {
     if (isUniqueViolation(error)) {

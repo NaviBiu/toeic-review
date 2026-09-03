@@ -18,7 +18,7 @@ const listSchema = z.object({
   dateTo: optionalDate,
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().max(100).optional(),
-});
+}).strict();
 
 const createSchema = z.object({
   categoryId: z.number().int().positive(),

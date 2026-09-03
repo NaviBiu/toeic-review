@@ -12,6 +12,9 @@ const createSchema = z.object({ name: z.string().trim().min(1) }).strict();
 const reorderSchema = z.object({
   orderedIds: z.array(z.number().int().positive()),
 }).strict();
+const listSchema = z.object({
+  includeDeleted: z.enum(['true', 'false']).optional(),
+}).strict();
 
 function errorResponse(error: unknown) {
   if (error instanceof ReadingCategoryError) {
@@ -33,15 +36,18 @@ async function parseJson(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const includeDeleted = req.nextUrl.searchParams.get('includeDeleted');
-  if (includeDeleted !== null && includeDeleted !== 'true' && includeDeleted !== 'false') {
+  const parsed = listSchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
+  if (!parsed.success) {
     return NextResponse.json({ error: '请求参数不正确' }, { status: 400 });
   }
 
   const client = createClient();
   await client.connect();
   try {
-    return NextResponse.json(await listReadingCategories(client, includeDeleted === 'true'));
+    return NextResponse.json(await listReadingCategories(
+      client,
+      parsed.data.includeDeleted === 'true',
+    ));
   } catch (error) {
     return errorResponse(error);
   } finally {
