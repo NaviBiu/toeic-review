@@ -5,6 +5,8 @@ type ReviewItemActionsProps = {
   onMastered: () => void;
   onDelete: () => void;
   className?: string;
+  masteredLabel?: string;
+  deleteLabel?: string;
 };
 
 export default function ReviewItemActions({
@@ -12,9 +14,13 @@ export default function ReviewItemActions({
   onMastered,
   onDelete,
   className = '',
+  masteredLabel: masteredLabelOverride,
+  deleteLabel: deleteLabelOverride,
 }: ReviewItemActionsProps) {
-  const masteredLabel = mode === 'work' ? workReviewCopy.mastered : '标记为已掌握';
-  const deleteLabel = mode === 'work' ? workReviewCopy.delete : '删除（不需要再复习）';
+  const masteredLabel = masteredLabelOverride
+    ?? (mode === 'work' ? workReviewCopy.mastered : '标记为已掌握');
+  const deleteLabel = deleteLabelOverride
+    ?? (mode === 'work' ? workReviewCopy.delete : '删除（不需要再复习）');
   const neutralColor = mode === 'work' ? 'text-slate-500' : 'text-stone-400';
 
   return (

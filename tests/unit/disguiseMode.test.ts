@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   getDisguiseTitle,
   getNextWorkSkin,
+  workReadingReviewCopy,
   workModeNav,
   workReviewCopy,
   workSkins,
@@ -35,5 +36,16 @@ describe('disguise mode labels', () => {
     expect(workReviewCopy.confirmed).toBe('Confirmed');
     expect(workReviewCopy.followUp).toBe('Needs follow-up');
     expect(workReviewCopy.mastered).toBe('Mark as mastered');
+    expect(workReadingReviewCopy).toEqual(expect.objectContaining({
+      tab: 'Reading review',
+      start: 'Begin review',
+      known: 'Known',
+      unknown: 'Needs follow-up',
+      previousKnown: 'Previous: known',
+      previousUnknown: 'Previous: needs follow-up',
+      changePrevious: 'Change previous decision',
+      category: 'Workstream',
+      noteDate: 'Reference date',
+    }));
   });
 });

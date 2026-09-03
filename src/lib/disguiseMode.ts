@@ -47,6 +47,18 @@ export const workReviewCopy = {
   exampleAudio: 'Read context aloud',
 };
 
+export const workReadingReviewCopy = {
+  tab: 'Reading review',
+  start: 'Begin review',
+  known: 'Known',
+  unknown: 'Needs follow-up',
+  previousKnown: 'Previous: known',
+  previousUnknown: 'Previous: needs follow-up',
+  changePrevious: 'Change previous decision',
+  category: 'Workstream',
+  noteDate: 'Reference date',
+};
+
 export const studyNav = [
   { href: '/review', label: '今日复盘' },
   { href: '/knowledge-points', label: '错题库' },

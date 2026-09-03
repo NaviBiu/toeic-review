@@ -1,450 +1,95 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { SCENARIOS } from '@/lib/scenarios';
-import Header from '@/components/Header';
-import ReviewItemActions from '@/components/ReviewItemActions';
-import { useWorkMode } from '@/hooks/useWorkMode';
-import { workReviewCopy } from '@/lib/disguiseMode';
 
-type KP = { id: number; term: string; meaning: string; example: string; notes: string | null };
+import { useEffect, useState } from 'react';
+import Header from '@/components/Header';
+import ListeningReview, { type ListeningReviewItem } from '@/components/review/ListeningReview';
+import ReadingReview from '@/components/readingNotes/ReadingReview';
+import SectionTabs from '@/components/SectionTabs';
+import { useWorkMode } from '@/hooks/useWorkMode';
+import type { ReadingQueuePage } from '@/lib/readingNotes/types';
+
+type ReviewTab = 'listening' | 'reading';
+
+async function json<T>(response: Response, message: string): Promise<T> {
+  if (!response.ok) throw new Error(message);
+  return response.json() as Promise<T>;
+}
 
 export default function ReviewPage() {
-  const { enabled: workMode, skin } = useWorkMode();
-  const [queue, setQueue] = useState<KP[]>([]);
-  const [index, setIndex] = useState(0);
-  const [phase, setPhase] = useState<'guessing' | 'revealed'>('guessing');
-  const [guess, setGuess] = useState<'remember' | 'forgot' | null>(null);
-  const [undo, setUndo] = useState<{ id: number; term: string; index: number } | null>(null);
-  const [majorFilter, setMajorFilter] = useState('');
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voiceName, setVoiceName] = useState('');
-  const [loading, setLoading] = useState(true);
+  const { enabled: workMode } = useWorkMode();
+  const [tab, setTab] = useState<ReviewTab>('listening');
+  const [listeningQueue, setListeningQueue] = useState<ListeningReviewItem[] | null>(null);
+  const [readingPage, setReadingPage] = useState<ReadingQueuePage | null>(null);
+  const [listeningCount, setListeningCount] = useState(0);
+  const [readingCount, setReadingCount] = useState(0);
   const [loadError, setLoadError] = useState('');
-  const [actionError, setActionError] = useState('');
-
-  async function loadQueue() {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const params = new URLSearchParams();
-      if (majorFilter) params.set('scenarioMajor', majorFilter);
-      const res = await fetch(`/api/review/queue?${params}`);
-      if (!res.ok) throw new Error('队列加载失败,请刷新重试');
-      const data: KP[] = await res.json();
-      setQueue(data);
-      setIndex(0);
-      setPhase('guessing');
-      setGuess(null);
-    } catch (err: any) {
-      // Without this, a failed fetch left `queue` as [] -- indistinguishable
-      // from a genuinely empty "今天没有需要复盘的内容" state.
-      setLoadError(err.message ?? '网络错误,请刷新重试');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { loadQueue(); }, [majorFilter]);
 
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    const loadVoices = () => {
-      const englishVoices = window.speechSynthesis.getVoices()
-        .filter((voice) => /^en[-_]/i.test(voice.lang));
-      setVoices(englishVoices);
-      const saved = window.localStorage.getItem('toeic-speech-voice');
-      const preferred = englishVoices.find((voice) => voice.name === saved)
-        ?? englishVoices.find((voice) => /natural|online/i.test(voice.name))
-        ?? englishVoices.find((voice) => /^en-US/i.test(voice.lang));
-      if (preferred) setVoiceName(preferred.name);
-    };
-    loadVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+    let active = true;
+    const listeningRequest = fetch('/api/review/queue?')
+      .then((response) => json<ListeningReviewItem[]>(response, '听力复盘加载失败'));
+    const readingCountRequest = fetch('/api/reading-review/count')
+      .then((response) => json<{ count: number }>(response, '阅读复盘加载失败'));
+
+    Promise.all([listeningRequest, readingCountRequest])
+      .then(([listening, reading]) => {
+        if (!active) return undefined;
+        setListeningQueue(listening);
+        setListeningCount(listening.length);
+        setReadingCount(reading.count);
+        return fetch('/api/reading-review/queue?limit=50')
+          .then((response) => json<ReadingQueuePage>(response, '阅读复盘加载失败'))
+          .then((page) => {
+            if (active) setReadingPage(page);
+          });
+      })
+      .catch((error) => {
+        if (active) setLoadError(error instanceof Error ? error.message : '复盘加载失败');
+      });
+    return () => { active = false; };
   }, []);
 
-  function changeVoice(name: string) {
-    setVoiceName(name);
-    window.localStorage.setItem('toeic-speech-voice', name);
-  }
-
-  const current = queue[index];
-
-  // Browser-native TTS (Web Speech API) -- zero API cost, runs entirely on
-  // the device, no network call to anything.
-  function speak(text: string) {
-    if (!('speechSynthesis' in window) || !text) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.voice = voices.find((voice) => voice.name === voiceName) ?? null;
-    window.speechSynthesis.speak(utterance);
-  }
-
-  // Plays each text in order, term then example, stopping after one full
-  // pass (no looping). Used for the automatic phase-transition playback;
-  // manual 🔊 clicks use the single-text `speak` above instead.
-  function speakSequence(texts: string[]) {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    let i = 0;
-    function playNext() {
-      if (i >= texts.length) return;
-      const text = texts[i++];
-      if (!text) { playNext(); return; }
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.voice = voices.find((voice) => voice.name === voiceName) ?? null;
-      utterance.onend = playNext;
-      window.speechSynthesis.speak(utterance);
-    }
-    playNext();
-  }
-
-  // Auto-plays term then example once whenever a card is freshly shown --
-  // once "blind" (考察页, masked, phase=guessing -- this is the actual
-  // listening test: can you recognize it by ear with nothing to read) and
-  // once again on reveal (答案页, phase=revealed, full text + audio
-  // together as reinforcement). Re-fires whenever the current item or
-  // phase changes, not on every render.
-  useEffect(() => {
-    if (!current) return;
-    speakSequence([current.term, current.example]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, phase]);
-
-  // Stop any in-progress speech when leaving the page entirely.
-  useEffect(() => {
-    return () => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); };
-  }, []);
-
-  // → triggers the same action as clicking 下一个, but only once an answer
-  // has actually been revealed (otherwise there is nothing to advance from).
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight' && phase === 'revealed') {
-        next();
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, current, guess]);
-
-  function pickGuess(value: 'remember' | 'forgot') {
-    setGuess(value);
-    setPhase('revealed');
-  }
-
-  function revoke() {
-    // Flip to the other choice without re-hiding the answer or returning to the
-    // guessing phase -- per spec, 撤回 lets the user correct a mis-click while
-    // still seeing meaning/example/notes, then commit via 下一个. It is not a
-    // "start over blind" action.
-    setGuess((g) => (g === 'remember' ? 'forgot' : 'remember'));
-  }
-
-  async function next() {
-    setActionError('');
-    if (current && guess) {
-      try {
-        const res = await fetch(`/api/review/${current.id}/answer`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ correct: guess === 'remember' }),
-        });
-        if (!res.ok) {
-          // Do NOT advance -- guess/phase stay exactly as they are so the
-          // user can just click 下一个 again. Previously this result was
-          // silently dropped and the UI moved on as if it had been saved.
-          setActionError('保存失败,这条结果还没记上,请重试');
-          return;
-        }
-      } catch {
-        setActionError('网络错误,这条结果还没记上,请重试');
-        return;
-      }
-      // A wrong answer stays due today on the backend (src/lib/srs.ts) instead
-      // of moving to tomorrow -- re-appending it here makes it actually
-      // resurface within this same sitting instead of only on next page load,
-      // so today's session can't be finished on it until it's answered right.
-      if (guess === 'forgot') {
-        setQueue((q) => [...q, current]);
-      }
-    }
-    setIndex((i) => i + 1);
-    setPhase('guessing');
-    setGuess(null);
-  }
-
-  async function updateCurrentStatus(status: 'deleted' | 'mastered') {
-    if (!current) return;
-    setActionError('');
-    const deletedId = current.id;
-    const deletedTerm = current.term;
-    const deletedIndex = index;
-    try {
-      const res = await fetch(`/api/knowledge-points/${deletedId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) {
-        setActionError('删除失败,请重试');
-        return;
-      }
-    } catch {
-      setActionError('网络错误,删除失败,请重试');
-      return;
-    }
-    if (status === 'deleted') {
-      setUndo({ id: deletedId, term: deletedTerm, index: deletedIndex });
-      setTimeout(() => setUndo((u) => (u?.id === deletedId ? null : u)), 5000);
-    }
-    setIndex((i) => i + 1);
-    setPhase('guessing');
-    setGuess(null);
-  }
-
-  async function handleDelete() {
-    await updateCurrentStatus('deleted');
-  }
-
-  async function handleMastered() {
-    await updateCurrentStatus('mastered');
-  }
-
-  async function handleUndo() {
-    if (!undo) return;
-    try {
-      const res = await fetch(`/api/knowledge-points/${undo.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'active' }),
-      });
-      if (!res.ok) {
-        setActionError('撤销失败,请重试');
-        return;
-      }
-    } catch {
-      setActionError('网络错误,撤销失败,请重试');
-      return;
-    }
-    // Jump back to exactly where it was -- as if the delete never happened,
-    // not just "restored in the database but gone from this session".
-    setIndex(undo.index);
-    setPhase('guessing');
-    setGuess(null);
-    setUndo(null);
-  }
-
-  const remaining = Math.max(0, queue.length - index);
-
-  if (workMode) {
-    return (
-      <main className="min-h-screen bg-slate-50">
-        <Header />
-        <div className={`work-review-page work-review-document work-skin-${skin.id} mx-auto max-w-4xl px-4 py-8 sm:px-6`}>
-          <section className="work-review-sheet work-review-document-sheet border border-slate-300 bg-white shadow-sm">
-            <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
-              <p className="font-mono text-[11px] uppercase tracking-wide text-slate-400">{skin.title} / section 01</p>
-              <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                <h1 className="font-mono text-2xl font-semibold text-slate-950">{skin.reviewTitle}</h1>
-                <div className="flex items-center gap-3">
-                  {voices.length > 0 && <select aria-label="Speech voice" title="Speech voice" value={voiceName} onChange={(e) => changeVoice(e.target.value)} className="max-w-44 border border-slate-300 bg-white px-2 py-1 font-mono text-[11px] text-slate-600"><option value="">Speech voice</option>{voices.map((voice) => <option key={`${voice.name}-${voice.lang}`} value={voice.name}>{voice.name} ({voice.lang})</option>)}</select>}
-                  <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-600">{workReviewCopy.pending(remaining)}</span>
-                </div>
-              </div>
-            </header>
-            <div className="p-6 sm:p-8">
-              <div className="work-review-purpose grid gap-8 border-b border-slate-200 pb-8 lg:grid-cols-[1.15fr_.85fr]">
-                <div><p className="font-mono text-[11px] uppercase tracking-wide text-slate-500">Document purpose</p><p className="mt-3 text-base leading-7 text-slate-600">This document records the current review queue and confirms whether each referenced item satisfies the expected interpretation and context requirements.</p></div>
-                <div className="work-review-summary grid grid-cols-2 border border-slate-300 font-mono text-xs text-slate-600"><div className="border-b border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Owner</p><p className="mt-1 text-slate-900">Language Ops</p></div><div className="border-b border-slate-300 p-3"><p className="text-[10px] text-slate-400">Revision</p><p className="mt-1 text-slate-900">0.8</p></div><div className="border-r border-slate-300 p-3"><p className="text-[10px] text-slate-400">Items pending</p><p className="mt-1 text-slate-900">{workReviewCopy.pending(remaining)}</p></div><div className="p-3"><p className="text-[10px] text-slate-400">Classification</p><p className="mt-1 text-slate-900">Internal</p></div></div>
-              </div>
-
-              <p className="mt-8 font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Review decision</p>
-
-              {actionError && <p className="mt-4 border-l-2 border-amber-600 bg-amber-50 px-3 py-2 text-sm text-amber-800">{workReviewCopy.saveError}</p>}
-              {loading ? (
-                <p className="py-12 text-center font-mono text-sm text-slate-500">{workReviewCopy.loading}</p>
-              ) : loadError ? (
-                <p className="py-12 text-center font-mono text-sm text-slate-600">{workReviewCopy.loadError}</p>
-              ) : !current ? (
-                <div className="work-review-empty py-10 text-center font-mono text-sm text-slate-600"><p>{workReviewCopy.empty}</p><p className="mt-3 text-[11px] uppercase tracking-wide text-slate-400">No action items require acknowledgement.</p></div>
-              ) : (
-                <section className="work-review-item mt-6 border border-slate-300 bg-white">
-                  <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[11px] uppercase tracking-wide text-slate-500"><span>Current item</span><span>Priority: standard</span></header>
-                  <div className="p-6">
-                    <div className="flex items-center gap-2"><p className={'font-mono text-2xl font-semibold text-slate-950' + (phase === 'guessing' ? ' blur-md select-none' : '')}>{current.term}</p><button onClick={() => speak(current.term)} title={workReviewCopy.termAudio} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900">🔊</button></div>
-                    <div className="mt-3 flex items-center gap-2"><p className={'font-mono text-sm italic text-slate-500' + (phase === 'guessing' ? ' blur-md select-none' : '')}>{current.example}</p><button onClick={() => speak(current.example)} title={workReviewCopy.exampleAudio} className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900">🔊</button></div>
-                    {phase === 'guessing' ? (
-                      <div className="mt-7 flex flex-col gap-3 sm:flex-row"><button onClick={() => pickGuess('remember')} className="flex-1 border border-slate-700 bg-slate-700 py-3 font-mono text-sm text-white hover:bg-slate-800">{workReviewCopy.confirmed}</button><button onClick={() => pickGuess('forgot')} className="flex-1 border border-slate-300 bg-white py-3 font-mono text-sm text-slate-700 hover:bg-slate-50">{workReviewCopy.followUp}</button></div>
-                    ) : (
-                      <div className="mt-6 border-t border-slate-200 pt-5"><p className="font-mono text-sm text-slate-600">Decision recorded for this reference. Continue when ready to review the next item.</p><div className="mt-5 border-y border-slate-200 py-4"><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-700">Reference analysis</p><p className="mt-3 text-sm leading-6 text-slate-700">{current.meaning}</p><p className="mt-3 text-xs leading-5 text-slate-500">{current.notes || 'No additional analysis recorded.'}</p></div><div className="mt-5 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><span className={'rounded-full px-3 py-1 font-mono text-xs ' + (guess === 'remember' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800')}>{guess === 'remember' ? workReviewCopy.confirmed : workReviewCopy.followUp}</span><button onClick={revoke} title={workReviewCopy.revert} aria-label={workReviewCopy.revert} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900">↩</button></div><button onClick={next} className="border border-slate-700 bg-slate-700 px-4 py-2 font-mono text-sm text-white hover:bg-slate-800">{workReviewCopy.continue}</button></div></div>
-                    )}
-                    <ReviewItemActions
-                      mode="work"
-                      onMastered={handleMastered}
-                      onDelete={handleDelete}
-                      className="mt-5 justify-end border-t border-slate-200 pt-4"
-                    />
-                  </div>
-                </section>
-              )}
-              <div className="mt-10 grid gap-8 border-t border-slate-200 pt-8 sm:grid-cols-2"><div><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Acceptance criteria</p><ul className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-sm text-slate-600"><li>Statement is recognised in context.</li><li>Reference material is complete.</li><li>Decision can be recorded.</li></ul></div><div><p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-slate-800">Change record</p><ul className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-sm text-slate-600"><li>Review terminology updated today.</li><li>Queue status synchronized.</li><li>Baseline criteria retained.</li></ul></div></div>
-            </div>
-          </section>
-        </div>
-      </main>
-    );
-  }
+  const options = [
+    { value: 'listening' as const, label: `${workMode ? 'Listening review' : '听力复盘'} ${listeningCount}` },
+    { value: 'reading' as const, label: `${workMode ? 'Reading review' : '阅读复盘'} ${readingCount}` },
+  ];
 
   return (
-    <main className="min-h-screen bg-stone-50">
+    <main className={`min-h-screen ${workMode ? 'bg-slate-50' : 'bg-stone-50'}`}>
       <Header />
-      <div className="mx-auto max-w-xl px-6 py-12">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-stone-900">今日复盘</h1>
-          {remaining > 0 && (
-            <div className="text-sm font-medium text-stone-400">剩余 {remaining} 个</div>
-          )}
-        </div>
-
-        <select
-          value={majorFilter}
-          onChange={(e) => setMajorFilter(e.target.value)}
-          className="mb-6 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 shadow-sm"
-        >
-          <option value="">全部场景</option>
-          {Object.keys(SCENARIOS).map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-
-        {voices.length > 0 && (
-          <select
-            aria-label="选择英语音色"
-            title="选择英语音色"
-            value={voiceName}
-            onChange={(e) => changeVoice(e.target.value)}
-            className="mb-6 ml-2 max-w-56 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 shadow-sm"
-          >
-            <option value="">选择英语音色</option>
-            {voices.map((voice) => <option key={`${voice.name}-${voice.lang}`} value={voice.name}>{voice.name} ({voice.lang})</option>)}
-          </select>
-        )}
-
-        {actionError && <p className="mb-4 text-sm text-red-600">{actionError}</p>}
-
-        {loading ? (
-          <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-stone-400 shadow-sm">
-            加载中…
-          </div>
-        ) : loadError ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-10 text-center text-red-600 shadow-sm">
-            {loadError}
-          </div>
-        ) : !current ? (
-          <div className="rounded-2xl border border-stone-200 bg-white p-10 text-center shadow-sm">
-            <p className="text-2xl">🎉</p>
-            <p className="mt-3 text-stone-500">今天没有需要复盘的内容</p>
-          </div>
-        ) : (
-          <>
-            <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
-              {/* 考察页(guessing): term + example shown but masked -- this is the
-                  actual listening test, recognize it by ear with nothing to read.
-                  答案页(revealed): both unmasked, plus meaning/notes. */}
-              <div className="flex items-center gap-2">
-                <p className={'text-3xl font-bold text-stone-900' + (phase === 'guessing' ? ' blur-md select-none' : '')}>
-                  {current.term}
-                </p>
-                <button
-                  onClick={() => speak(current.term)}
-                  title="朗读"
-                  className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
-                >
-                  🔊
-                </button>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <p className={'text-sm text-stone-400 italic' + (phase === 'guessing' ? ' blur-md select-none' : '')}>
-                  {current.example}
-                </p>
-                <button
-                  onClick={() => speak(current.example)}
-                  title="朗读例句"
-                  className="shrink-0 rounded-full p-1 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
-                >
-                  🔊
-                </button>
-              </div>
-
-              {phase === 'guessing' && (
-                <div className="mt-6 flex gap-3">
-                  <button
-                    onClick={() => pickGuess('remember')}
-                    className="flex-1 rounded-xl bg-emerald-600 py-3 font-medium text-white shadow-sm transition hover:bg-emerald-700"
-                  >
-                    记得
-                  </button>
-                  <button
-                    onClick={() => pickGuess('forgot')}
-                    className="flex-1 rounded-xl bg-stone-200 py-3 font-medium text-stone-600 transition hover:bg-stone-300"
-                  >
-                    不记得
-                  </button>
-                </div>
-              )}
-              {phase === 'revealed' && (
-                <>
-                  <div className="mt-5 border-t border-stone-100 pt-5">
-                    <p className="text-stone-800">{current.meaning}</p>
-                    {current.notes && <p className="mt-2 text-sm text-stone-400">{current.notes}</p>}
-                  </div>
-                  <div className="mt-6 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={
-                          'rounded-full px-3 py-1 text-sm font-medium ' +
-                          (guess === 'remember' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700')
-                        }
-                      >
-                        你的判断:{guess === 'remember' ? '记得' : '不记得'}
-                      </span>
-                      <button
-                        onClick={revoke}
-                        title="撤回(改选)"
-                        className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-indigo-600"
-                      >
-                        ↺
-                      </button>
-                    </div>
-                    <button
-                      onClick={next}
-                      title="下一个 (键盘 →)"
-                      className="rounded-xl bg-indigo-600 px-5 py-2.5 text-lg font-medium text-white shadow-sm transition hover:bg-indigo-700"
-                    >
-                      →
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            <ReviewItemActions
-              mode="study"
-              onMastered={handleMastered}
-              onDelete={handleDelete}
-              className="mt-3 justify-end"
-            />
-          </>
-        )}
+      <div className={`mx-auto px-4 pt-6 sm:px-6 ${workMode ? 'max-w-4xl' : 'max-w-2xl'}`}>
+        <SectionTabs
+          value={tab}
+          options={options}
+          onChange={setTab}
+          label={workMode ? 'Review type' : '复盘类型'}
+        />
       </div>
 
-      {undo && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-xl bg-stone-800 px-4 py-3 text-white shadow-lg">
-          已删除「{undo.term}」
-          <button onClick={handleUndo} className="font-medium underline">撤销</button>
+      {loadError ? (
+        <p role="alert" className="mx-auto mt-8 max-w-2xl border-l-2 border-red-600 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {workMode ? 'Unable to load the review queue. Please try again.' : loadError}
+        </p>
+      ) : null}
+      {listeningQueue ? (
+        <div hidden={tab !== 'listening'}>
+          <ListeningReview
+            mode={workMode ? 'work' : 'study'}
+            prefetched={listeningQueue}
+            active={tab === 'listening'}
+            onPendingChange={setListeningCount}
+          />
         </div>
-      )}
+      ) : null}
+      {readingPage ? (
+        <div hidden={tab !== 'reading'}>
+          <ReadingReview
+            mode={workMode ? 'work' : 'study'}
+            prefetched={readingPage}
+            onPendingChange={setReadingCount}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

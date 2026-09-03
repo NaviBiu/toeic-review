@@ -70,6 +70,18 @@ body {
   padding-left: 1.25rem;
 }
 
+@media (max-width: 640px) {
+  .reading-rich-content table {
+    min-width: 100%;
+    table-layout: fixed;
+  }
+
+  .reading-rich-content th,
+  .reading-rich-content td {
+    overflow-wrap: anywhere;
+  }
+}
+
 [data-work-mode="true"] body {
   overflow-x: clip;
 }
