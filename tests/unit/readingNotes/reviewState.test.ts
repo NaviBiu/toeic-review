@@ -270,7 +270,7 @@ describe('reading review repository', () => {
       },
     });
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes('WITH locked_attempt AS MATERIALIZED')) {
+      if (sql.includes('FOR UPDATE OF note') && !sql.includes('ORDER BY id DESC')) {
         return { rows: [correctionRow({
           before_state: stored.before_state,
           correct_streak: 99,
@@ -278,7 +278,7 @@ describe('reading review repository', () => {
           wrong_count: 99,
         })] };
       }
-      if (sql.includes('WITH updated_attempt AS')) {
+      if (sql.includes('WITH latest AS MATERIALIZED')) {
         return { rows: [correctionRow({
           decision: 'known',
           correct_streak: 3,
@@ -299,6 +299,8 @@ describe('reading review repository', () => {
     })).resolves.toMatchObject({ attempt: { id: 31, decision: 'known' } });
 
     expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls[1][0]).not.toContain('ORDER BY id DESC');
+    expect(query.mock.calls[2][0]).toContain('ORDER BY id DESC');
     expect(query.mock.calls[2][0]).toContain('UPDATE reading_note_review_attempts');
     expect(query.mock.calls[2][0]).toContain('UPDATE reading_notes');
     expect(query.mock.calls[2][1]).toEqual([
@@ -308,8 +310,11 @@ describe('reading review repository', () => {
 
   it('rolls back when correction is no longer the note latest attempt', async () => {
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes('WITH locked_attempt AS MATERIALIZED')) {
-        return { rows: [correctionRow({ is_latest: false })] };
+      if (sql.includes('FOR UPDATE OF note') && !sql.includes('ORDER BY id DESC')) {
+        return { rows: [correctionRow()] };
+      }
+      if (sql.includes('WITH latest AS MATERIALIZED')) {
+        return { rows: [] };
       }
       return { rows: [] };
     });
@@ -323,7 +328,7 @@ describe('reading review repository', () => {
       kind: 'conflict',
       message: '只能修改该知识点最近一次复盘结果',
     });
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
     expect(query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
 });

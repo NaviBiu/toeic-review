@@ -36,7 +36,6 @@ type CorrectionRow = ReadingNoteRow & {
   review_date: string;
   before_state: unknown;
   after_state: unknown;
-  is_latest?: boolean;
 };
 
 export type ReadingSessionState = {
@@ -385,51 +384,32 @@ export async function correctReadingAttempt(
 
   return transaction(client, async () => {
     const { rows } = await client.query(
-      `WITH locked_attempt AS MATERIALIZED (
-         SELECT attempt.id, attempt.request_id, attempt.note_id, attempt.decision,
-           attempt.review_date, attempt.before_state, attempt.after_state
-         FROM reading_note_review_attempts attempt
-         WHERE attempt.id = $1
-         FOR UPDATE OF attempt
-       ), locked_note AS MATERIALIZED (
-         SELECT note.*, category.name AS category_name
-         FROM reading_notes note
-         JOIN locked_attempt attempt ON attempt.note_id = note.id
-         JOIN reading_note_categories category ON category.id = note.category_id
-         WHERE note.status <> 'deleted'
-         FOR UPDATE OF note
-       ), latest AS (
-         SELECT latest_attempt.id
-         FROM locked_note note
-         JOIN LATERAL (
-           SELECT id
-           FROM reading_note_review_attempts
-           WHERE note_id = note.id
-           ORDER BY id DESC
-           LIMIT 1
-         ) latest_attempt ON true
-       )
-       SELECT attempt.id AS attempt_id, attempt.request_id, attempt.note_id,
+      `SELECT attempt.id AS attempt_id, attempt.request_id, attempt.note_id,
          attempt.decision, attempt.review_date, attempt.before_state, attempt.after_state,
-         note.*, attempt.id = latest.id AS is_latest
-       FROM locked_attempt attempt
-       JOIN locked_note note ON note.id = attempt.note_id
-       JOIN latest ON true`,
+         note.*, category.name AS category_name
+       FROM reading_note_review_attempts attempt
+       JOIN reading_notes note ON note.id = attempt.note_id
+       JOIN reading_note_categories category ON category.id = note.category_id
+       WHERE attempt.id = $1 AND note.status <> 'deleted'
+       FOR UPDATE OF note`,
       [input.attemptId],
     );
     const current = rows[0] as CorrectionRow | undefined;
     if (!current) throw new ReadingReviewError('复盘记录不存在', 'not_found');
-    if (!current.is_latest) {
-      throw new ReadingReviewError('只能修改该知识点最近一次复盘结果', 'conflict');
-    }
 
     const afterState = applyDecision(snapshotFrom(current.before_state), input.decision, input.today);
     const updated = await client.query(
-      `WITH updated_attempt AS (
+      `WITH latest AS MATERIALIZED (
+         SELECT id
+         FROM reading_note_review_attempts
+         WHERE note_id = $10
+         ORDER BY id DESC
+         LIMIT 1
+       ), updated_attempt AS (
          UPDATE reading_note_review_attempts
          SET decision = $2, after_state = $3::jsonb,
            corrected_at = now(), updated_at = now()
-         WHERE id = $1
+         WHERE id = $1 AND id = (SELECT id FROM latest)
          RETURNING id, request_id, note_id, decision, review_date, before_state, after_state
        ), updated_note AS (
          UPDATE reading_notes
@@ -450,7 +430,9 @@ export async function correctReadingAttempt(
         afterState.nextReviewDate, afterState.lastReviewedDate, current.note_id],
     );
     const result = updated.rows[0] as CorrectionRow | undefined;
-    if (!result) throw new ReadingReviewError('阅读知识点状态已变化，请重试', 'conflict');
+    if (!result) {
+      throw new ReadingReviewError('只能修改该知识点最近一次复盘结果', 'conflict');
+    }
     return {
       attempt: mapCorrectionAttempt(result),
       note: mapReadingNoteRow(result),
