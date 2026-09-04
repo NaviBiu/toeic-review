@@ -163,6 +163,14 @@ export default function ReadingImport() {
             <button type="button" onClick={() => void confirmImport()} disabled={confirming || accepted.size === 0} className="rounded-md bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300">
               {confirming ? '正在导入…' : `确认导入 ${accepted.size} 条`}
             </button>
+            <button
+              type="button"
+              onClick={() => { setPreview(null); setAccepted(new Set()); setError(''); }}
+              disabled={confirming || usingAi}
+              className="rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:text-stone-400"
+            >
+              取消本次导入
+            </button>
             {preview.aiFallbackAvailable ? <button type="button" onClick={() => void handleAiFallback()} disabled={usingAi} className="rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:text-stone-400">
               {usingAi ? 'DeepSeek 正在解析…' : '使用 AI 重新解析（调用 DeepSeek 1 次）'}
             </button> : null}

@@ -92,4 +92,24 @@ describe('reading import UI', () => {
       body: JSON.stringify({ token: 'signed-preview' }),
     });
   });
+
+  it('can cancel a parsed preview without confirming or making another request', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => preview } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => root.render(<ReadingImport />));
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('File input not found');
+
+    await act(async () => setFile(input, new File(['PK fixture'], 'notes.docx')));
+    expect(host.textContent).toContain('确认导入 1 条');
+
+    const cancel = [...host.querySelectorAll('button')].find((button) => (
+      button.textContent === '取消本次导入'
+    ));
+    if (!cancel) throw new Error('Cancel import button not found');
+    await act(async () => cancel.click());
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(host.textContent).not.toContain('确认导入 1 条');
+  });
 });
