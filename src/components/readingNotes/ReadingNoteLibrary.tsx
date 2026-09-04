@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '@/components/Modal';
 import Pagination from '@/components/Pagination';
 import type { ReadingNote, ReadingNoteCategory } from '@/lib/readingNotes/types';
-import ReadingCategoryManager from './ReadingCategoryManager';
+import ReadingCategoryManager, { type ReadingCategoryMutation } from './ReadingCategoryManager';
 import ReadingNoteEditor, { type ReadingNoteSaveInput } from './ReadingNoteEditor';
 import { RichReadingContent } from './RichReadingContent';
 
@@ -25,6 +25,20 @@ async function responseJson<T>(response: Response, fallback: string): Promise<T>
 
 function matchesStatus(note: ReadingNote, status: string) {
   return !status || note.status === status;
+}
+
+export function applyReadingCategoryMutation(
+  note: ReadingNote,
+  mutation: ReadingCategoryMutation,
+) {
+  if (note.categoryId !== mutation.sourceId || mutation.targetId === null || !mutation.targetName) {
+    return note;
+  }
+  return {
+    ...note,
+    categoryId: mutation.targetId,
+    categoryName: mutation.targetName,
+  };
 }
 
 export default function ReadingNoteLibrary({
@@ -104,13 +118,9 @@ export default function ReadingNoteLibrary({
     if (undoTimer.current) clearTimeout(undoTimer.current);
   }, []);
 
-  function revalidate() {
-    void Promise.all([
-      fetchNotes(),
-      fetchCategories(),
-    ]).then(([nextPage, nextCategories]) => {
+  function revalidateNotes() {
+    void fetchNotes().then((nextPage) => {
       setResult(nextPage);
-      setCategories(nextCategories);
     }).catch(() => undefined);
   }
 
@@ -145,7 +155,7 @@ export default function ReadingNoteLibrary({
       });
       setEditorOpen(false);
       setEditingNote(null);
-      revalidate();
+      revalidateNotes();
     } catch (nextError) {
       setSaveError(nextError instanceof Error ? nextError.message : '保存失败，请重试');
     } finally {
@@ -169,7 +179,7 @@ export default function ReadingNoteLibrary({
         body: JSON.stringify({ status: 'mastered' }),
       });
       await responseJson<ReadingNote>(response, '标记失败，请重试');
-      revalidate();
+      revalidateNotes();
     } catch (nextError) {
       setResult(before);
       setError(nextError instanceof Error ? nextError.message : '标记失败，请重试');
@@ -193,7 +203,7 @@ export default function ReadingNoteLibrary({
       setUndo({ note, token: body.undoToken });
       if (undoTimer.current) clearTimeout(undoTimer.current);
       undoTimer.current = setTimeout(() => setUndo(null), 5000);
-      revalidate();
+      revalidateNotes();
     } catch (nextError) {
       setResult(before);
       setError(nextError instanceof Error ? nextError.message : '删除失败，请重试');
@@ -219,7 +229,7 @@ export default function ReadingNoteLibrary({
           items: [restored, ...current.items].slice(0, current.pageSize),
         }));
       }
-      revalidate();
+      revalidateNotes();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '撤销失败，请重试');
     }
@@ -294,8 +304,15 @@ export default function ReadingNoteLibrary({
         <ReadingNoteEditor categories={categories} note={editingNote} saving={saving} error={saveError} onSave={(input) => void saveNote(input)} onCancel={() => setEditorOpen(false)} />
       </Modal>
 
-      <Modal open={categoryManagerOpen} onClose={() => { setCategoryManagerOpen(false); revalidate(); }} title="管理阅读分类" size="lg" compact>
-        <ReadingCategoryManager categories={categories} onChanged={setCategories} />
+      <Modal open={categoryManagerOpen} onClose={() => setCategoryManagerOpen(false)} title="管理阅读分类" size="lg" compact>
+        <ReadingCategoryManager
+          categories={categories}
+          onChanged={setCategories}
+          onMutation={(mutation) => setResult((current) => ({
+            ...current,
+            items: current.items.map((note) => applyReadingCategoryMutation(note, mutation)),
+          }))}
+        />
       </Modal>
 
       {undo ? (
