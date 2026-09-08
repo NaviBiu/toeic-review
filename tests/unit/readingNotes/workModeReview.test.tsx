@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Header from '@/components/Header';
+import ListeningReview from '@/components/review/ListeningReview';
 import ReadingReview from '@/components/readingNotes/ReadingReview';
 import { WORK_MODE_STORAGE_KEY } from '@/lib/disguiseMode';
 import type { ReadingNote } from '@/lib/readingNotes/types';
@@ -22,6 +23,17 @@ const note: ReadingNote = {
   wrongCount: 0,
   nextReviewDate: '2026-09-03',
   lastReviewedDate: null,
+};
+
+const listeningItem = {
+  id: 7,
+  term: 'revenue',
+  meaning: '收入',
+  example: 'Revenue increased during the quarter.',
+  notes: 'Business performance vocabulary',
+  part: 3,
+  scenarioMajor: '一般商务',
+  scenarioMinor: '会议',
 };
 
 let host: HTMLDivElement;
@@ -61,6 +73,8 @@ describe('reading review work mode', () => {
     expect(host.textContent).toContain('Open another document');
     expect(host.textContent).toContain('Daily Review Requirements');
     expect(host.textContent).toContain('Reading review');
+    expect(host.querySelector('.work-review-document')?.classList).toContain('work-skin-requirements');
+    expect(host.querySelector('.work-review-document > section')?.classList).toContain('work-review-document-sheet');
 
     const begin = [...host.querySelectorAll('button')].find((item) => item.textContent === 'Begin review');
     if (!begin) throw new Error('Begin review button not found');
@@ -75,5 +89,14 @@ describe('reading review work mode', () => {
     if (!known) throw new Error('Known button not found');
     await act(async () => known.click());
     expect(host.textContent).toContain('Previous: known');
+  });
+
+  it('uses the shared document sheet structure for listening review', async () => {
+    await act(async () => root.render(<ListeningReview mode="work" prefetched={[listeningItem]} active />));
+    await act(async () => Promise.resolve());
+
+    const shell = host.querySelector('section[aria-label="Listening review"]');
+    expect(shell?.classList).toContain('work-skin-requirements');
+    expect(shell?.querySelector(':scope > section')?.classList).toContain('work-review-document-sheet');
   });
 });

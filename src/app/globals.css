@@ -260,6 +260,11 @@ body {
   max-width: 960px;
 }
 
+[data-work-mode="true"] main > .work-review-panel {
+  width: 100%;
+  max-width: none;
+}
+
 [data-work-mode="true"] h1,
 [data-work-mode="true"] h2 {
   color: #0f172a;

@@ -72,7 +72,7 @@ export default function ReviewPage() {
         </p>
       ) : null}
       {listeningQueue ? (
-        <div hidden={tab !== 'listening'}>
+        <div className="work-review-panel" hidden={tab !== 'listening'}>
           <ListeningReview
             mode={workMode ? 'work' : 'study'}
             prefetched={listeningQueue}
@@ -82,7 +82,7 @@ export default function ReviewPage() {
         </div>
       ) : null}
       {readingPage ? (
-        <div hidden={tab !== 'reading'}>
+        <div className="work-review-panel" hidden={tab !== 'reading'}>
           <ReadingReview
             mode={workMode ? 'work' : 'study'}
             prefetched={readingPage}

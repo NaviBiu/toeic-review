@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReviewItemActions from '@/components/ReviewItemActions';
+import { useWorkMode } from '@/hooks/useWorkMode';
 import { workReadingReviewCopy, workReviewCopy } from '@/lib/disguiseMode';
 import type {
   ReadingDecision,
@@ -54,6 +55,7 @@ function insertAt(queue: ReadingNote[], note: ReadingNote, index: number) {
 }
 
 export default function ReadingReview({ mode, prefetched, onPendingChange }: ReadingReviewProps) {
+  const { skin } = useWorkMode();
   const [started, setStarted] = useState(false);
   const [queue, setQueue] = useState<ReadingNote[]>(() => prefetched?.items ?? []);
   const [pending, setPending] = useState(prefetched?.totalPending ?? 0);
@@ -392,12 +394,12 @@ export default function ReadingReview({ mode, prefetched, onPendingChange }: Rea
   return (
     <section aria-label={work ? workReadingReviewCopy.tab : '阅读复盘'}>
       {work ? (
-        <div className="work-review-document mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <div className={`work-review-document work-skin-${skin.id} mx-auto max-w-4xl px-4 py-8 sm:px-6`}>
           <section className="work-review-document-sheet border border-slate-300 bg-white shadow-sm">
             <header className="border-b border-slate-200 px-6 py-6 sm:px-8">
-              <p className="font-mono text-[11px] uppercase text-slate-400">Internal requirements document / section 02</p>
+              <p className="font-mono text-[11px] uppercase text-slate-400">{skin.title} / section 02</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                <h1 className="font-mono text-2xl font-semibold text-slate-950">Daily Review Requirements</h1>
+                <h1 className="font-mono text-2xl font-semibold text-slate-950">{skin.reviewTitle}</h1>
                 <span className="border border-slate-300 px-2 py-1 font-mono text-[11px] text-slate-600">{workReviewCopy.pending(pending)}</span>
               </div>
             </header>
